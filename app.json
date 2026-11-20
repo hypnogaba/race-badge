@@ -1,0 +1,13 @@
+{
+  "id": "race-to-zero",
+  "name": "Race to Zero",
+  "version": "0.1.0",
+  "author": "@hypnogaba",
+  "summary": "Run the DoubleZero fiber, outrun the shark biting the cable, grab Solana, Kalshi, Hyperliquid and Phoenix coins to open the DZ tunnel.",
+  "icon": "play",
+  "accent": "3FF5E0",
+  "category": "games",
+  "permissions": [
+    "led"
+  ]
+}
