@@ -72,7 +72,7 @@ def play_until_over(r, autopilot=True, max_ticks=40000):
 r = Runner(3, expose=EXPOSE)
 shot(r, "01_title")
 check("title shows the menu", all(has_text(r, s) for s in ("RUN", "LEADERBOARD", "STATS", "HOW TO PLAY", "SETTINGS")))
-check("sys.tick asked for 60 Hz", True)
+check("sys.tick asked for 60 Hz (17 ms)", getattr(r.m, "tick_ms", None) == 17)
 
 for n, (scene, name) in enumerate((("lb", "leaderboard"), ("stats", "stats"), ("help", "help"),
                                    ("settings", "settings")), start=1):
@@ -303,6 +303,20 @@ for _ in range(200):
 r.key("back")
 r.key("back")
 check("quit from pause goes to the title and counts the run", g(r, "__scene") == "title" and g(r, "__save")["runs"] == 1)
+check("a run quit from pause is still sent to the board", any(u.endswith("/score") for _, u, _ in r.m.http))
+
+# HOME during the death animation: the run is counted and kept for the next launch
+r = Runner(17, expose=EXPOSE)
+r.key("select")
+for _ in range(2000):
+    if g(r, "__scene") == "dying":
+        break
+    r.tick(17)
+check("reached the death animation", g(r, "__scene") == "dying")
+r.cb("on_exit")
+check("exit while dying counts the run", g(r, "__save")["runs"] == 1)
+check("exit while dying keeps the run to send later", isinstance(r.m.storage.get("lb_pending"), object)
+      and r.m.storage.get("lb_pending") is not None)
 
 print("max instructions per callback:", r.maxi)
 print(f"FAILED {fails}" if fails else "all passed")

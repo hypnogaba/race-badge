@@ -10,7 +10,7 @@ import argparse, os, random, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sim import Runner  # noqa: E402
 
-EXPOSE = "function __S() return S end\nfunction __scene() return scene end"
+EXPOSE = "function __S() return S end\nfunction __scene() return scene end\nfunction __speed() return speed(S) end"
 
 
 def lua_list(t):
@@ -55,7 +55,7 @@ def run_once(seed, sigma, shots=None, every=0, max_s=600):
             break
         if sc == "play" and s is not None:
             # speed is a local function in main.lua: recompute from distance like the game does
-            s_py = {"obs": s["obs"], "dist": s["dist"], "_speed": game_speed(s)}
+            s_py = {"obs": s["obs"], "dist": s["dist"], "_speed": r.lua.globals()["__speed"]()}
             if s["y"] >= 150 and want_jump(s_py, rnd, sigma, plan):
                 r.key("up")
         r.tick(30)
@@ -65,18 +65,6 @@ def run_once(seed, sigma, shots=None, every=0, max_s=600):
             r.m.render(os.path.join(shots, f"run{seed}_{n:03d}.png"))
     s = r.lua.globals()["__S"]()
     return t / 1000, s["score"], r
-
-
-def game_speed(s):
-    tick, dist, lap, fx = s["tick"], s["dist"], s["lap"], s["fx"]
-    v = 1.6 + min(dist / 9000, 0.9) + max(0, tick - 7200) / 3600 * 0.35 + lap * 0.25
-    if fx["K"] > 0:
-        v *= 1.6
-    if fx["T"] > 0:
-        v *= 2
-    if fx["slow"] > 0:
-        v *= 0.5
-    return v
 
 
 if __name__ == "__main__":

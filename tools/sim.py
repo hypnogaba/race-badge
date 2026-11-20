@@ -266,7 +266,7 @@ function sys.millis() return PY.millis() end
 function sys.keys() return PY.keys() end
 function sys.memory() return {used = math.floor(collectgarbage("count") * 1024), max = 6291456} end
 function sys.exit() end
-function sys.tick(ms) return 30 end
+function sys.tick(ms) PY.tick(ms) return 30 end
 function sys.time() return PY.now() end
 badge = {}
 function badge.owner() return "@val" end
@@ -300,6 +300,7 @@ class Runner:
             "toast": lambda t: m.toasts.append((m.millis, t)), "clear": m.clear,
             "led": lambda i, c: m.leds.__setitem__(int(i) - 1, int(c)),
             "millis": lambda: m.millis,
+            "tick": lambda ms: setattr(m, "tick_ms", int(ms)),
             "now": now or (lambda: 1795000000 + m.millis // 1000),
             "award": self._award,
             "http": self._http,

@@ -7,10 +7,13 @@
 export const APP = 'race-to-zero';
 const SERVER = 'https://badge-api.solana.com';
 const MAX_SCORE = 5_000_000;
-// The most a run can earn per second (score x2 and x3 in the tunnel, bit combos, bonuses), with room to spare.
-// A score above this for the time it claims is refused.
-const MAX_PER_SEC = 200;
-const BONUS_ROOM = 2000;
+// The most a run can earn per second: the game speeds up without a ceiling, so a 30 minute run with
+// score x2, the tunnel's x3 and IBRL earns about 370/s; 1000/s leaves room. A score above this for the time
+// it claims is refused. The badge reports that time itself, so this only stops clumsy cheats; a real
+// check would need the run's inputs replayed on the server.
+const MAX_PER_SEC = 1000;
+const BONUS_ROOM = 5000;
+const MAX_SECS = 86_400;
 
 const keys = new Map(); // key id -> CryptoKey
 const seen = new Map(); // X-Badge-Request -> time
@@ -85,7 +88,7 @@ export default {
     if (req.method === 'POST' && url.pathname === '/score') {
       let d;
       try { d = JSON.parse(body); } catch { return json({ error: 'bad json' }, 400); }
-      if (!int(d.score, 1, MAX_SCORE) || !int(d.lap, 1, 999) || !int(d.tunnels, 0, 9999) || !int(d.secs, 1, 7200)) {
+      if (!int(d.score, 1, MAX_SCORE) || !int(d.lap, 1, 999) || !int(d.tunnels, 0, 9999) || !int(d.secs, 1, MAX_SECS)) {
         return json({ error: 'bad score' }, 400);
       }
       if (d.score > d.secs * MAX_PER_SEC + BONUS_ROOM) return json({ error: 'too fast' }, 400);

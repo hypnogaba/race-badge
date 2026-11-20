@@ -241,12 +241,23 @@ local function submit_score(run, cb)
   end)
 end
 
+-- keep a run for later when it cannot be sent now (only the best unsent one)
+local function keep_pending(run)
+  local p = storage.get("lb_pending")
+  if run.score > 0 and (type(p) ~= "table" or (tonumber(p.score) or 0) < run.score) then
+    storage.set("lb_pending", {score = run.score, lap = run.lap, tunnels = run.tunnels, secs = run.secs, name = lb_name()})
+  end
+end
+
 local function flush_pending()
   local p = storage.get("lb_pending")
   if http and type(p) == "table" and type(p.score) == "number" then
     storage.remove("lb_pending")
-    submit_score({score = int_or(p.score, 1, 5000000, 0), lap = int_or(p.lap, 1, 999, 1),
-      tunnels = int_or(p.tunnels, 0, 9999, 0), secs = int_or(p.secs, 1, 7200, 1)})
+    local secs = int_or(p.secs, 1, 86400, 0)
+    if secs > 0 then  -- a damaged entry is dropped rather than sent with a made-up time
+      submit_score({score = int_or(p.score, 1, 5000000, 0), lap = int_or(p.lap, 1, 999, 1),
+        tunnels = int_or(p.tunnels, 0, 9999, 0), secs = secs})
+    end
   end
 end
 
@@ -509,34 +520,38 @@ local function step(s, jump, held)
   -- the world scrolls
   local v = speed(s)
   s.dist = s.dist + v
-  local keep = {}
-  for _, o in ipairs(s.obs) do
+  local list, j = s.obs, 0
+  for i = 1, #list do
+    local o = list[i]
     o.x = o.x - v
-    if o.x + o.w > DESPAWN_X then keep[#keep + 1] = o end
+    if o.x + o.w > DESPAWN_X then j = j + 1 list[j] = o end
   end
-  s.obs = keep
-  keep = {}
-  for _, p in ipairs(s.pick) do
+  for i = #list, j + 1, -1 do list[i] = nil end
+  list, j = s.pick, 0
+  for i = 1, #list do
+    local p = list[i]
     if p.kind == "bit" and p.x >= MISS_X and p.x - v < MISS_X then s.combo = 0 end
     p.x = p.x - v
-    if p.x > DESPAWN_X then keep[#keep + 1] = p end
+    if p.x > DESPAWN_X then j = j + 1 list[j] = p end
   end
-  s.pick = keep
-  keep = {}
-  for _, g in ipairs(s.grass) do
+  for i = #list, j + 1, -1 do list[i] = nil end
+  list, j = s.grass, 0
+  for i = 1, #list do
+    local g = list[i]
     g.x = g.x - v
-    if g.x + g.w > DESPAWN_X then keep[#keep + 1] = g end
+    if g.x + g.w > DESPAWN_X then j = j + 1 list[j] = g end
   end
-  s.grass = keep
+  for i = #list, j + 1, -1 do list[i] = nil end
   if s.dist >= s.next_spawn then spawn(s) end
 
-  -- pickups
-  keep = {}
-  for _, p in ipairs(s.pick) do
+  -- pickups (a tunnel may start here and clear the obstacles; the pickup list is compacted in place)
+  list, j = s.pick, 0
+  for i = 1, #list do
+    local p = list[i]
     if abs(p.x - CENTER_X) < 8 and abs(p.y - (s.y - 7)) < 10 then apply_pickup(s, p)
-    else keep[#keep + 1] = p end
+    else j = j + 1 list[j] = p end
   end
-  s.pick = keep
+  for i = #list, j + 1, -1 do list[i] = nil end
 
   -- grass slows you down
   if s.y >= GROUND_Y then
@@ -708,6 +723,9 @@ local function popup(text, x, y, color)
   p.l:pos(floor(x), floor(y))
 end
 
+local BIT_FRAMES = {"bit1", "bit2", "bit3", "bit2"}
+local RARE_TEXT = {hypurr = "+250 HYPURR", zero = "+500 WEN ZERO", brokenPixel = "+100 BROKEN PIXEL",
+  multicast = "MULTICAST x3"}
 local WORLD_NAME = {}
 for i, w in ipairs(A.worlds) do WORLD_NAME[i] = w.name end
 
@@ -771,8 +789,7 @@ local function handle_events(s)
     elseif t == "grass" then
       popup("TOUCHED GRASS: SLOW", sx(PLAYER_X), sy(s.y) - 44, 0x2ECC71)
     elseif t == "rare" then
-      local txt = ({hypurr = "+250 HYPURR", zero = "+500 WEN ZERO", brokenPixel = "+100 BROKEN PIXEL",
-        multicast = "MULTICAST x3"})[e.kind]
+      local txt = RARE_TEXT[e.kind]
       popup(txt, sx(PLAYER_X) + 10, sy(s.y) - 44, 0xFFD166)
       flash(0xFFD166, 0.2)
       if e.kind == "hypurr" or e.kind == "zero" or e.kind == "brokenPixel" then
@@ -859,12 +876,11 @@ local function draw(s, dt)
     end
   end
   -- pickups
-  local bitf = {"bit1", "bit2", "bit3", "bit2"}
   for i, sl in ipairs(V.pick) do
     local p = s.pick[i]
     if p and p.x < 164 then
       local name
-      if p.kind == "bit" then name = bitf[floor(s.tick / 8) % 4 + 1]
+      if p.kind == "bit" then name = BIT_FRAMES[floor(s.tick / 8) % 4 + 1]
       elseif #p.kind == 1 then name = "coin" .. p.kind
       elseif p.kind == "hypurr" then name = frame("hypurr", s.tick, 10)
       elseif p.kind == "multicast" then name = "multicast1"
@@ -952,7 +968,6 @@ end
 -- ================================================================== scenes
 local show_title, show_help, show_over, show_lb, show_stats, show_settings, show_share
 local last_run = nil   -- {score, lap, tunnels, secs, new_best} of the last finished run
-local lb_back = "title"
 
 local function held()
   if not sys.keys then return true end
@@ -1005,7 +1020,7 @@ end
 local function finish_run()
   local s = S
   local run = {score = floor(s.score), lap = s.lap + 1, tunnels = s.stats.tunnels,
-    secs = max(1, floor(s.tick / TICK_HZ + 0.5)), new_best = false}
+    secs = min(86400, max(1, floor(s.tick / TICK_HZ + 0.5))), new_best = false}
   save.runs = save.runs + 1
   save.total = min(2000000000, save.total + run.score)
   save.tunnels = save.tunnels + s.stats.tunnels
@@ -1022,6 +1037,12 @@ local function finish_run()
   if run.new_best then award("best") end
   last_run = run
   return run
+end
+
+-- a run that ends without the game over screen (quit from pause, HOME): counted and sent later
+local function finish_quietly()
+  local run = finish_run()
+  keep_pending(run)  -- the title screen sends it
 end
 
 show_over = function()
@@ -1122,8 +1143,7 @@ local function lb_fetch()
   http.get(LB .. "/top?n=10&when=" .. lb.when, function(ok, res) lb_show(ok, res, gen) end)
 end
 
-show_lb = function(back)
-  lb_back = back or "title"
+show_lb = function()
   scene = "lb"
   ui.clear()
   ui.bg(0x0B1030)
@@ -1365,7 +1385,7 @@ function on_key(key, rep)
       local id = V.menu[V.sel].id
       leds_off()  -- the title's light show stops on every other screen
       if id == "play" then start_run(false)
-      elseif id == "lb" then show_lb("title")
+      elseif id == "lb" then show_lb()
       elseif id == "stats" then show_stats()
       elseif id == "settings" then set_sel = 1 show_settings()
       else show_help() end
@@ -1395,7 +1415,7 @@ function on_key(key, rep)
     if over_t > 0 then return true end
     if key == "select" then start_run(false)
     elseif key == "up" then show_share()
-    elseif key == "down" then show_lb("over")
+    elseif key == "down" then show_lb()
     elseif key == "back" then leds_off() show_title() end
     return true
   elseif scene == "dying" then
@@ -1408,7 +1428,7 @@ function on_key(key, rep)
     if paused then
       if key == "select" then set_pause(false)
       elseif key == "back" and not rep then
-        finish_run()
+        finish_quietly()
         leds_off()
         show_title()
       end
@@ -1468,7 +1488,8 @@ function on_tick(ms)
 end
 
 function on_exit()
-  if S and scene == "play" and not demo then finish_run() end
+  -- the app is closing: no time for an answer, so the run waits in storage for the next launch
+  if S and (scene == "play" or scene == "dying") and not demo then keep_pending(finish_run()) end
   leds_off()
 end
 
