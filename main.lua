@@ -970,7 +970,7 @@ local function start_run(is_demo)
   S.ibrl = ibrl and not demo
   build_play()
   if demo then
-    ui.label(0, 22, "DEMO  -  PRESS ANY KEY TO PLAY", {size = 12, color = 0x3FF5E0, w = ui.W, align = "center"})
+    ui.label(0, GY + 14, "DEMO  -  PRESS ANY KEY TO PLAY", {size = 12, color = 0x3FF5E0, w = ui.W, align = "center"})
     ui.hint("any key: menu")
     return
   end
@@ -1363,6 +1363,7 @@ function on_key(key, rep)
       title_draw_menu()
     elseif key == "select" then
       local id = V.menu[V.sel].id
+      leds_off()  -- the title's light show stops on every other screen
       if id == "play" then start_run(false)
       elseif id == "lb" then show_lb("title")
       elseif id == "stats" then show_stats()
