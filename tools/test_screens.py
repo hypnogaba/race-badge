@@ -1,4 +1,4 @@
-"""Walks every screen of RACE TO ZERO in the badge mock and checks what each one does:
+"""Walks every screen of FIBER RUN in the badge mock and checks what each one does:
 menu, demo, a real run, game over (board submit, rank), share QR, leaderboard tabs, stats,
 achievements, settings, reset, IBRL and gm codes, pause and quit, !LAMP rules, pending scores.
 
@@ -71,6 +71,7 @@ def play_until_over(r, autopilot=True, max_ticks=40000):
 # ---------------------------------------------------------------- title and menu
 r = Runner(3, expose=EXPOSE)
 shot(r, "01_title")
+check("title shows the name FIBER RUN", has_text(r, "FIBER RUN"))
 check("title shows the menu", all(has_text(r, s) for s in ("RUN", "LEADERBOARD", "STATS", "HOW TO PLAY", "SETTINGS")))
 check("sys.tick asked for 60 Hz (17 ms)", getattr(r.m, "tick_ms", None) == 17)
 
@@ -182,7 +183,7 @@ t = cap.get("t", "")
 check("QR text fits 256 bytes with the biggest numbers", 0 < len(t) <= 256)
 txt = unquote_plus(t.split("text=", 1)[1]) if "text=" in t else ""
 check("post text names the score, @doublezero, @SolanaFndn and the link",
-      "4999999 ms" in txt and "@doublezero" in txt and "@SolanaFndn" in txt and "race.speedlab.pro" in txt)
+      "4999999 ms" in txt and "@doublezero" in txt and "@SolanaFndn" in txt and "race.speedlab.pro" in txt and "Fiber Run" in txt and "zero" not in txt.lower().replace("doublezero",""))
 print("   QR:", len(t), "bytes:", txt)
 
 # ---------------------------------------------------------------- server refused / offline: pending score
@@ -248,7 +249,7 @@ def peak(held):
 lo, hi = peak(False), peak(True)
 check(f"holding jumps higher ({lo:.1f} vs {hi:.1f} units)", hi > lo * 1.25)
 
-# ---------------------------------------------------------------- Hypurr form, zero sky
+# ---------------------------------------------------------------- Hypurr form, light-speed sky
 r = Runner(14, expose=EXPOSE)
 r.key("select")
 g(r, "__S")["fx"]["H"] = 300
@@ -258,7 +259,7 @@ shot(r, "08_hypurr")
 g(r, "__S")["score"] = 9999.9
 for _ in range(10):
     r.tick(17)
-check("10 000 ms: zero latency banner", has_text(r, "ZERO LATENCY"))
+check("10 000 ms: light speed banner", has_text(r, "LIGHT SPEED"))
 check("10 000 ms: 10K CLUB achievement", g(r, "__save")["ach"]["k10"] is True)
 shot(r, "09_zero_sky")
 

@@ -1,10 +1,10 @@
-// RACE TO ZERO (badge) leaderboard: a Cloudflare Worker with a D1 database.
+// FIBER RUN (badge) leaderboard: a Cloudflare Worker with a D1 database.
 // Every request must come through the badge server, which signs it (X-Badge-* headers).
 //   POST /score  {score, lap, tunnels, secs, name}  -> keeps the player's best, all time and today (UTC)
 //   GET  /top?n=10&when=all|today                   -> {top: [{r, n, s, l}], me: {r, s} | null, when}
 // See https://solana.com/breakpoint/badge/apps/docs (http: "What your server receives").
 
-export const APP = 'race-to-zero';
+export const APP = 'fiber-run';
 const SERVER = 'https://badge-api.solana.com';
 const MAX_SCORE = 5_000_000;
 // The most a run can earn per second: the game speeds up without a ceiling, so a 30 minute run with
@@ -46,7 +46,7 @@ function once(id, time) {
 
 const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
 
-/** The badge and player behind a request from RACE TO ZERO, or null. */
+/** The badge and player behind a request from FIBER RUN, or null. */
 export async function fromBadge(req, body) {
   const h = (n) => req.headers.get(n) ?? '';
   const time = Number(h('x-badge-time'));

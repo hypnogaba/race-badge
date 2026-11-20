@@ -1,4 +1,4 @@
-# Race to Zero for the Solana Breakpoint badge
+# Fiber Run for the Solana Breakpoint badge
 
 The badge version of the DoubleZero runner [race.speedlab.pro](https://race.speedlab.pro):
 a trader runs along the fiber, a shark bites the cable from below (two bites and you are out),

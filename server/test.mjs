@@ -1,4 +1,4 @@
-// node --experimental-sqlite server/test.mjs  (RACE TO ZERO badge leaderboard)
+// node --experimental-sqlite server/test.mjs  (FIBER RUN badge leaderboard)
 // Signs requests the way the badge server does (own Ed25519 key) and runs them
 // against the worker with an in-memory SQLite standing in for D1.
 import { DatabaseSync } from 'node:sqlite';
@@ -33,7 +33,7 @@ hooks.fetchKey = async () => ({ id: 'k1', key: pub });
 
 const hex = (b) => Buffer.from(b).toString('hex');
 let reqN = 0;
-async function call(method, path, bodyObj, { user = 'u1', badge = '7K2Q9M', app = 'race-to-zero', time = Date.now(), tamper = false, req: rid } = {}) {
+async function call(method, path, bodyObj, { user = 'u1', badge = '7K2Q9M', app = 'fiber-run', time = Date.now(), tamper = false, req: rid } = {}) {
   const url = `https://race-badge-scores.example.workers.dev${path}`;
   const body = bodyObj === undefined ? '' : JSON.stringify(bodyObj);
   const id = rid ?? `r${++reqN}`;

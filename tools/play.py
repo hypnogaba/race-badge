@@ -1,4 +1,4 @@
-"""A bot plays RACE TO ZERO in the badge mock (tools/sim.py): it checks the game runs, counts VM
+"""A bot plays FIBER RUN in the badge mock (tools/sim.py): it checks the game runs, counts VM
 instructions per callback (the badge allows 200,000) and saves screenshots.
 
   .venv/bin/python tools/play.py [--runs 5] [--sigma 3] [--seed 1] [--shots tools/out/shots --every 1500]
