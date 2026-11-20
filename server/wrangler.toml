@@ -1,0 +1,8 @@
+name = "race-badge-scores"
+main = "worker.js"
+compatibility_date = "2026-11-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "race-badge-scores"
+database_id = "366250d8-5293-4d9e-9e6d-c664f56e2550"

@@ -1,13 +1,18 @@
 {
   "id": "race-to-zero",
   "name": "Race to Zero",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "@hypnogaba",
-  "summary": "Run the DoubleZero fiber, outrun the shark biting the cable, grab Solana, Kalshi, Hyperliquid and Phoenix coins to open the DZ tunnel.",
+  "summary": "Run the DoubleZero fiber, outrun the shark, grab Solana, Kalshi, Hyperliquid and Phoenix coins to open the DZ tunnel. Global leaderboard, daily !LAMPs, share your run on X.",
   "icon": "play",
   "accent": "3FF5E0",
   "category": "games",
   "permissions": [
-    "led"
+    "led",
+    "http",
+    "lamps"
+  ],
+  "hosts": [
+    "race-badge-scores.hypnogaba.workers.dev"
   ]
 }

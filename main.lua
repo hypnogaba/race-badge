@@ -20,6 +20,10 @@ local GY = 176                  -- cable surface on screen
 local PLAYER_X, PLAYER_W = 20, 12
 local GRAVITY, JUMP_V = 0.19, -3.5
 local JUMP_BUFFER = 8           -- a press this many ticks before landing still jumps
+local HOLD_GRAVITY = 0.62       -- holding the button while rising: a higher, floatier jump
+local HOLD_TICKS = 16           -- for at most this many ticks after take-off
+local IBRL_SPEED, IBRL_SCORE = 1.2, 1.2  -- secret IBRL MODE: everything faster, a little more score
+local ZERO_SKY_AT = 10000       -- "zero latency" sky once the score passes this
 
 local BASE_SPEED, RAMP_DIST, RAMP_MAX = 1.6, 9000, 0.9
 local SPAWN_X, DESPAWN_X = 168, -24
@@ -90,17 +94,49 @@ local function frame(base, tick, every)
   return base .. (floor(tick / every) % n + 1)
 end
 
--- ------------------------------------------------------------------ save
-local save = {best = 0, runs = 0}
+-- ------------------------------------------------------------------ save, settings, stats
+local function int_or(v, lo, hi, def)
+  if type(v) ~= "number" or v ~= v or v < lo or v > hi then return def end
+  return floor(v)
+end
+
+local ACH = {  -- achievements, in the order the stats screen lists them
+  {id = "tunnel", name = "FIRST DZ TUNNEL"},
+  {id = "lap2", name = "LAP 2"},
+  {id = "lap5", name = "LAP 5"},
+  {id = "k10", name = "10K CLUB"},
+  {id = "clean", name = "A LAP WITHOUT A BITE"},
+  {id = "combo", name = "COMBO x5"},
+  {id = "hypurr", name = "HYPURR FOUND"},
+  {id = "zero", name = "WEN ZERO"},
+  {id = "pixel", name = "BROKEN PIXEL"},
+  {id = "runs50", name = "50 RUNS"},
+  {id = "ibrl", name = "IBRL"},
+}
+
+local save = {best = 0, runs = 0, total = 0, tunnels = 0, coins = 0, bits = 0, best_lap = 0, secs = 0, ach = {}}
+local settings = {leds = true, name = true}
 do
   local v = storage.get("save")
   if type(v) == "table" then
-    save.best = tonumber(v.best) or 0
-    save.runs = tonumber(v.runs) or 0
+    for _, k in ipairs({"best", "runs", "total", "tunnels", "coins", "bits", "best_lap", "secs"}) do
+      save[k] = int_or(v[k], 0, 2000000000, 0)
+    end
+    if type(v.ach) == "table" then
+      for _, a in ipairs(ACH) do if v.ach[a.id] == true then save.ach[a.id] = true end end
+    end
+  end
+  local st = storage.get("settings")
+  if type(st) == "table" then
+    if st.leds == false then settings.leds = false end
+    if st.name == false then settings.name = false end
   end
 end
 local function persist()
-  storage.set("save", {best = save.best, runs = save.runs})
+  storage.set("save", save)
+end
+local function save_settings()
+  storage.set("settings", {leds = settings.leds, name = settings.name})
 end
 
 -- ------------------------------------------------------------------ LEDs
@@ -109,6 +145,7 @@ local led_now = {}
 local led_flash, led_flash_col = 0, 0
 
 local function led_put(n, col)
+  if not settings.leds then col = 0 end
   if has_led and led_now[n] ~= col then led_now[n] = col led.hex(n, col) end
 end
 local function leds_off()
@@ -116,6 +153,101 @@ local function leds_off()
 end
 local function flash(col, t)
   led_flash, led_flash_col = t or 0.2, col
+end
+
+-- ------------------------------------------------------------------ !LAMP rewards
+-- Once per UTC day each: 2 for the first DZ tunnel, 3 for reaching lap 2, 2 for a new best.
+-- At most 7 a day. The app's award cap on the server is the real limit; this only keeps
+-- the app from asking twice.
+local LAMP = {tunnel = {2, "first DZ tunnel today"}, lap2 = {3, "lap 2 today"}, best = {2, "new best"}}
+local needs_x = false
+local lamp_pending, lamp_session = {}, {}
+
+local function today()
+  local t = sys.time and sys.time()
+  if not t or t < 1700000000 then return nil end  -- no clock yet
+  return floor(t / 86400)
+end
+
+local function lamp_log()
+  local d = today()
+  if not d then return nil end
+  local log = storage.get("lamps")
+  if type(log) ~= "table" or log.day ~= d then log = {day = d, got = {}} end
+  if type(log.got) ~= "table" then log.got = {} end
+  return log
+end
+
+local function award(key)
+  if not lamps or not lamps.award or needs_x then return end
+  local amount, reason = LAMP[key][1], LAMP[key][2]
+  local log = lamp_log()
+  local day = log and log.day
+  local skey = key .. "@" .. tostring(day)
+  if (log and log.got[key]) or lamp_session[skey] or lamp_pending[key] then return end
+  lamp_pending[key] = true
+  lamps.award(amount, reason, function(ok, r)
+    lamp_pending[key] = nil
+    if ok and type(r) == "table" and r.needsX then
+      needs_x = true
+      ui.toast("Link X in My Badge to earn !LAMPs")
+      return
+    end
+    if not ok then return end
+    lamp_session[skey] = true
+    if type(r) == "table" and (tonumber(r.awarded) or 0) > 0 then
+      ui.toast("+" .. floor(r.awarded) .. " !LAMP" .. (r.awarded > 1 and "s" or "") .. "  " .. reason)
+    end
+    local now = lamp_log()
+    if now and now.day == day then
+      now.got[key] = true
+      storage.set("lamps", now)
+    end
+  end)
+end
+
+-- ------------------------------------------------------------------ leaderboard
+-- Our own server; the badge server signs each request, so it knows the badge owner (server/worker.js).
+local LB = "https://race-badge-scores.hypnogaba.workers.dev"
+local LB_ERR = {
+  offline = "Offline: join Wi-Fi to see the board",
+  ["not linked"] = "Claim this badge in My Badge first",
+  denied = "The board opens once the app is in the store",
+  busy = "Badge busy, try again", timeout = "No answer, try again",
+  ["too fast"] = "Too fast, wait a moment", unreachable = "Server unreachable",
+}
+
+local function lb_name()
+  if not settings.name then return "anon" end
+  local o = badge and badge.owner and badge.owner()
+  return (type(o) == "string" and o ~= "") and o or "anon"
+end
+
+local function submit_score(run, cb)
+  if not http or run.score <= 0 then return end
+  local body = {score = run.score, lap = run.lap, tunnels = run.tunnels, secs = run.secs, name = lb_name()}
+  http.post(LB .. "/score", body, function(ok, res)
+    if ok and type(res) == "table" and res.status == 200 then
+      if cb then cb(true, res) end
+      return
+    end
+    -- no answer or a struggling server: keep the best unsent run for later (a 4xx is final)
+    local retry = not ok or type(res) ~= "table" or res.status >= 500 or res.status == 429
+    local p = storage.get("lb_pending")
+    if retry and (type(p) ~= "table" or (tonumber(p.score) or 0) < run.score) then
+      storage.set("lb_pending", body)
+    end
+    if cb then cb(false, ok and ("server said " .. tostring(type(res) == "table" and res.status)) or res) end
+  end)
+end
+
+local function flush_pending()
+  local p = storage.get("lb_pending")
+  if http and type(p) == "table" and type(p.score) == "number" then
+    storage.remove("lb_pending")
+    submit_score({score = int_or(p.score, 1, 5000000, 0), lap = int_or(p.lap, 1, 999, 1),
+      tunnels = int_or(p.tunnels, 0, 9999, 0), secs = int_or(p.secs, 1, 7200, 1)})
+  end
 end
 
 -- ================================================================== the run (pure game logic)
@@ -130,6 +262,8 @@ local function new_state()
     obs = {}, pick = {}, grass = {}, zero_spawned = false,
     stats = {tunnels = 0, coins = 0, bits = 0, hits = 0},
     ev = {},
+    air = 0, lap_hits = 0, max_combo = 0, ibrl = false, zero_sky = false,
+    got_hypurr = false, got_zero = false, got_pixel = false,
   }
 end
 
@@ -143,6 +277,7 @@ local function speed(s)
   if f.K > 0 then v = v * K_SPEED end
   if f.T > 0 then v = v * T_SPEED end
   if f.slow > 0 then v = v * SLOW_SPEED end
+  if s.ibrl then v = v * IBRL_SPEED end
   return v
 end
 
@@ -263,19 +398,20 @@ end
 -- -------------------------------------------------- one tick
 local function apply_pickup(s, p)
   local k, f = p.kind, s.fx
-  local mult = (f.S > 0 and S_SCORE or 1) * (f.T > 0 and T_SCORE or 1)
+  local mult = (f.S > 0 and S_SCORE or 1) * (f.T > 0 and T_SCORE or 1) * (s.ibrl and IBRL_SCORE or 1)
   if k == "bit" then
     s.score = s.score + BIT_SCORE * (1 + min(COMBO_MAX, floor(s.combo / COMBO_STEP))) * mult
     s.combo = s.combo + 1
+    if s.combo > s.max_combo then s.max_combo = s.combo end
     s.stats.bits = s.stats.bits + 1
     emit(s, {t = "bit", combo = s.combo})
     return
   elseif k == "hypurr" then
-    s.score = s.score + HYPURR_BONUS emit(s, {t = "rare", kind = k}) return
+    s.score = s.score + HYPURR_BONUS s.got_hypurr = true emit(s, {t = "rare", kind = k}) return
   elseif k == "zero" then
-    s.score = s.score + ZERO_BONUS emit(s, {t = "rare", kind = k}) return
+    s.score = s.score + ZERO_BONUS s.got_zero = true emit(s, {t = "rare", kind = k}) return
   elseif k == "brokenPixel" then
-    s.score = s.score + PIXEL_BONUS emit(s, {t = "rare", kind = k}) return
+    s.score = s.score + PIXEL_BONUS s.got_pixel = true emit(s, {t = "rare", kind = k}) return
   elseif k == "multicast" then
     f.multicast, f.clones = DUR.multicast, CLONES
     emit(s, {t = "rare", kind = k})
@@ -314,6 +450,7 @@ local function hit(s)
   end
   s.shark = min(1, s.shark + SHARK_HIT)
   s.stats.hits = s.stats.hits + 1
+  s.lap_hits = s.lap_hits + 1
   s.combo = 0
   s.invuln = INVULN_HIT
   emit(s, {t = "hit"})
@@ -323,7 +460,8 @@ local function hit(s)
   end
 end
 
-local function step(s, jump)
+-- jump: the button was pressed this tick; held: it is held down now (for a higher jump)
+local function step(s, jump, held)
   if s.over then return end
   s.tick = s.tick + 1
   -- worlds and laps
@@ -334,7 +472,8 @@ local function step(s, jump)
     emit(s, {t = "world"})
     if s.wi == 1 then
       s.lap = s.lap + 1
-      emit(s, {t = "lap"})
+      emit(s, {t = "lap", clean = s.lap_hits == 0})
+      s.lap_hits = 0
     end
   end
   -- effects run down
@@ -356,12 +495,14 @@ local function step(s, jump)
     if s.y >= GROUND_Y then
       s.vy = JUMP_V
       s.jump_buf = 0
+      s.air = 0
       emit(s, {t = "jump"})
     else
       s.jump_buf = s.jump_buf - 1
     end
   end
-  s.vy = s.vy + GRAVITY
+  s.air = s.air + 1
+  s.vy = s.vy + ((held and s.vy < 0 and s.air <= HOLD_TICKS) and GRAVITY * HOLD_GRAVITY or GRAVITY)
   s.y = s.y + s.vy
   if s.y >= GROUND_Y then s.y, s.vy = GROUND_Y, 0 end
 
@@ -417,11 +558,37 @@ local function step(s, jump)
   end
   if s.over then return end
   s.score = s.score + v * SCORE_PER_SPEED * (f.S > 0 and S_SCORE or 1) * (f.T > 0 and T_SCORE or 1)
+    * (s.ibrl and IBRL_SCORE or 1)
+  if not s.zero_sky and s.score >= ZERO_SKY_AT then
+    s.zero_sky = true
+    emit(s, {t = "zerosky"})
+  end
+end
+
+-- the demo autopilot (and the test bot): jump so the trader is in the air over the next obstacle
+local demo_err = 0
+local function autopilot(s)
+  if s.y < GROUND_Y then return false end
+  local v = speed(s)
+  for _, o in ipairs(s.obs) do
+    if o.x + o.w >= BODY_X0 then
+      local dist = o.x - BODY_X1
+      local ideal = (AIRTIME * v - (o.w + 7)) / 2
+      if dist <= ideal + demo_err * v and dist > -o.w then
+        demo_err = (random() + random() + random() - 1.5) * 4
+        return true
+      end
+      return false
+    end
+  end
+  return false
 end
 
 -- ================================================================== screens
 local scene = "title"
 local paused = false
+local demo = false        -- the autopilot is playing (title screen left idle)
+local ibrl = false        -- secret IBRL MODE, entered with a code on the title screen
 local V = {}       -- objects of the play screen
 local overlay = {}
 local acc = 0      -- ms not yet simulated
@@ -547,10 +714,24 @@ for i, w in ipairs(A.worlds) do WORLD_NAME[i] = w.name end
 local function theme_of(s)
   local f = s.fx
   if f.T > 0 then return "T" end
+  if V.zero_t and V.zero_t > 0 then return "Z" end
   local k = s.last_coin
   if k == "P" and f.shield then return "P" end
   if k and k ~= "P" and f[k] > 0 then return k end
   return nil
+end
+
+-- -------------------------------------------------- achievements
+local function unlock(id, s)
+  if demo or save.ach[id] then return end
+  save.ach[id] = true
+  V.ach_dirty = true
+  for _, a in ipairs(ACH) do
+    if a.id == id then
+      popup("UNLOCKED: " .. a.name, 40, 120, 0x14F195)
+      flash(0x14F195, 0.3)
+    end
+  end
 end
 
 -- -------------------------------------------------- events -> screen, LEDs
@@ -565,6 +746,8 @@ local function handle_events(s)
     elseif t == "tunnel" then
       banner("DZ TUNNEL", "ZERO LATENCY. SCORE x3", 0x14F195, 2.2)
       flash(0x14F195, 0.4)
+      unlock("tunnel", s)
+      if not demo then award("tunnel") end
     elseif t == "hit" then
       V.lunge = 0.5
       if s.shark < 1 then banner("SHARK BITE!", "ONE MORE HIT CUTS THE CABLE", 0xFF3D6E, 1.6) end
@@ -577,6 +760,14 @@ local function handle_events(s)
     elseif t == "lap" then
       banner("LAP " .. (s.lap + 1), "FASTER. DENSER. KEEP RUNNING", 0xFFD166, 2)
       flash(0xFFD166, 0.3)
+      if s.lap + 1 >= 2 then unlock("lap2", s) if not demo then award("lap2") end end
+      if s.lap + 1 >= 5 then unlock("lap5", s) end
+      if e.clean then unlock("clean", s) end
+    elseif t == "zerosky" then
+      V.zero_t = 5
+      banner("ZERO LATENCY", "10 000 ms SAVED. THE SKY IS YOURS", 0xFFD166, 2.5)
+      flash(0xFFD166, 0.5)
+      unlock("k10", s)
     elseif t == "grass" then
       popup("TOUCHED GRASS: SLOW", sx(PLAYER_X), sy(s.y) - 44, 0x2ECC71)
     elseif t == "rare" then
@@ -584,9 +775,13 @@ local function handle_events(s)
         multicast = "MULTICAST x3"})[e.kind]
       popup(txt, sx(PLAYER_X) + 10, sy(s.y) - 44, 0xFFD166)
       flash(0xFFD166, 0.2)
+      if e.kind == "hypurr" or e.kind == "zero" or e.kind == "brokenPixel" then
+        unlock(e.kind == "brokenPixel" and "pixel" or e.kind, s)
+      end
     elseif t == "bit" then
       if e.combo % COMBO_STEP == 0 and e.combo <= COMBO_STEP * COMBO_MAX then
         popup("x" .. (1 + floor(e.combo / COMBO_STEP)), sx(PLAYER_X) + 26, sy(s.y) - 36, 0xFFD166)
+        if e.combo >= COMBO_STEP * COMBO_MAX then unlock("combo", s) end
       end
     end
   end
@@ -606,6 +801,8 @@ local function update_leds(s, dt)
   local c = 0
   if th == "T" then
     c = (floor(s.tick / 6) % 2 == 0) and 0x14F195 or 0x9945FF
+  elseif th == "Z" then
+    c = 0xFFD166
   elseif th then
     c = COIN_INFO[th].col
   end
@@ -622,7 +819,7 @@ local function draw(s, dt)
   if th ~= V.theme then
     V.theme = th
     V.sky:color(th and A.themes[th] or A.worlds[s.wi].sky)
-    local cc = th == "T" and 0x14F195 or th and COIN_INFO[th].col or 0x3FF5E0
+    local cc = th == "T" and 0x14F195 or th == "Z" and 0xFFD166 or th and COIN_INFO[th].col or 0x3FF5E0
     V.cable:color(cc)
   elseif not th and V.sky_world ~= s.wi then
     V.sky:color(A.worlds[s.wi].sky)
@@ -684,6 +881,11 @@ local function draw(s, dt)
   local py = sy(s.y) - 14 * U
   local px = sx(PLAYER_X)
   local pname = s.y < GROUND_Y and "traderJump1" or frame("traderRun", floor(s.dist), 9)
+  if s.fx.H > 0 then
+    -- Hyperliquid: the trader becomes Hypurr (only the picture changes, the hitbox stays)
+    pname = frame("hypurr", floor(s.dist), 9)
+    py = sy(s.y) - 10 * U
+  end
   if s.invuln > 0 and floor(s.invuln / 4) % 2 == 0 and not s.over then
     hide(V.player)
   else
@@ -706,6 +908,7 @@ local function draw(s, dt)
   -- fog of the public internet, unless a venue connects you to DZ
   if connected(s) then hide(V.fog) else put(V.fog, IMG.fog, ui.W - 80, GY - 154) end
 
+  if V.zero_t and V.zero_t > 0 then V.zero_t = V.zero_t - dt end
   -- banner and popups
   if V.banner_t > 0 then
     V.banner_t = V.banner_t - dt
@@ -747,28 +950,46 @@ local function draw(s, dt)
 end
 
 -- ================================================================== scenes
-local show_title, show_help, show_over
+local show_title, show_help, show_over, show_lb, show_stats, show_settings, show_share
+local last_run = nil   -- {score, lap, tunnels, secs, new_best} of the last finished run
+local lb_back = "title"
 
-local function start_run()
+local function held()
+  if not sys.keys then return true end
+  local k = sys.keys()
+  return type(k) == "table" and (k.up or k.select) and true or false
+end
+
+local function start_run(is_demo)
   scene = "play"
+  demo = is_demo and true or false
   paused = false
   acc = 0
   jump_req = false
   S = new_state()
+  S.ibrl = ibrl and not demo
   build_play()
-  save.runs = save.runs + 1
-  persist()
-  if save.runs <= 2 then
-    banner("UP or SELECT = JUMP", "GRAB S K H P FOR THE DZ TUNNEL", "text", 3)
+  if demo then
+    ui.label(0, 22, "DEMO  -  PRESS ANY KEY TO PLAY", {size = 12, color = 0x3FF5E0, w = ui.W, align = "center"})
+    ui.hint("any key: menu")
+    return
+  end
+  if S.ibrl then
+    unlock("ibrl", S)
+    banner("IBRL MODE", "INCREASE BANDWIDTH, REDUCE LATENCY", 0xFFD166, 2)
+  elseif save.runs < 2 then
+    banner("UP or SELECT = JUMP", "HOLD FOR HIGHER. GRAB S K H P", "text", 3.5)
   else
     banner("WORLD 01  CITY", "OUTRUN THE SHARK", "text", 1.4)
   end
-  ui.hint("UP / SELECT jump    CANCEL pause")
+  ui.hint("UP / SELECT jump (hold: higher)    CANCEL pause")
 end
 
 local function set_pause(on)
   paused = on
   if on then
+    -- a banner would show through the pause band
+    V.banner:text("") V.banner2:text("") V.banner_t = 0
     overlay[#overlay + 1] = ui.rect(0, 70, ui.W, 74, {color = 0x0B1030})
     overlay[#overlay + 1] = ui.gradient(0, 70, ui.W, 3)
     overlay[#overlay + 1] = ui.gradient(0, 141, ui.W, 3)
@@ -780,58 +1001,236 @@ local function set_pause(on)
   end
 end
 
+-- stats, best, achievements, !LAMPs and the board, once per real run
 local function finish_run()
-  local sc = floor(S.score)
-  local new_best = sc > save.best
-  if new_best then save.best = sc end
+  local s = S
+  local run = {score = floor(s.score), lap = s.lap + 1, tunnels = s.stats.tunnels,
+    secs = max(1, floor(s.tick / TICK_HZ + 0.5)), new_best = false}
+  save.runs = save.runs + 1
+  save.total = min(2000000000, save.total + run.score)
+  save.tunnels = save.tunnels + s.stats.tunnels
+  save.coins = save.coins + s.stats.coins
+  save.bits = save.bits + s.stats.bits
+  save.secs = save.secs + run.secs
+  if run.lap > save.best_lap then save.best_lap = run.lap end
+  if run.score > save.best then
+    save.best = run.score
+    run.new_best = save.runs > 1
+  end
+  if save.runs >= 50 then save.ach.runs50 = true end
   persist()
-  return sc, new_best
+  if run.new_best then award("best") end
+  last_run = run
+  return run
 end
 
 show_over = function()
   scene = "over"
   over_t = 0.6
-  local sc, new_best = finish_run()
-  overlay[#overlay + 1] = ui.rect(0, 46, ui.W, 126, {color = 0x0B1030})
-  overlay[#overlay + 1] = ui.gradient(0, 46, ui.W, 3)
-  overlay[#overlay + 1] = ui.gradient(0, 169, ui.W, 3)
-  center_label(56, "THE SHARK CUT THE CABLE", 20, 0xFF3D6E)
-  center_label(84, sc .. " ms saved", 32, 0xFFD166)
-  center_label(122, new_best and "NEW BEST!" or ("BEST " .. save.best), 14, new_best and 0x14F195 or "dim")
-  center_label(142, "tunnels " .. S.stats.tunnels .. "   coins " .. S.stats.coins .. "   bits " .. S.stats.bits
-    .. "   lap " .. (S.lap + 1), 12, "dim")
+  local run = finish_run()
+  overlay[#overlay + 1] = ui.rect(0, 40, ui.W, 140, {color = 0x0B1030})
+  overlay[#overlay + 1] = ui.gradient(0, 40, ui.W, 3)
+  overlay[#overlay + 1] = ui.gradient(0, 177, ui.W, 3)
+  center_label(48, "THE SHARK CUT THE CABLE", 20, 0xFF3D6E)
+  center_label(74, run.score .. " ms saved", 32, 0xFFD166)
+  center_label(110, run.new_best and "NEW BEST!" or ("BEST " .. save.best), 14, run.new_best and 0x14F195 or "dim")
+  center_label(128, "lap " .. run.lap .. "   tunnels " .. run.tunnels .. "   coins " .. S.stats.coins
+    .. "   bits " .. S.stats.bits, 12, "dim")
+  local rank = center_label(146, http and "sending to the board..." or "", 12, 0x3FF5E0)
+  center_label(162, "UP share on X    DOWN leaderboard", 12, "text")
   ui.hint("SELECT run again    CANCEL menu")
+  submit_score(run, function(ok, res)
+    if scene ~= "over" then return end
+    local data = ok and json.decode(res.body)
+    if type(data) == "table" and type(data.me) == "table" then
+      rank:text("YOU ARE #" .. int_or(data.me.r, 1, 999999, 0) .. " OF ALL TIME")
+    else
+      rank:text(ok and "" or ("not sent: " .. tostring(LB_ERR[res] or res)))
+    end
+  end)
 end
 
-show_title = function()
-  scene = "title"
-  paused = false
-  S = nil
-  ui.clear()
-  ui.bg(0x000000)
-  V = {}
-  overlay = {}
-  build_backdrop(1)
-  V.t = 0
-  V.hero = ui.image(150, GY - 28, IMG.traderRun1, {scale = U})
-  V.shark = ui.image(110, GY + 12, IMG.shark1, {scale = U})
-  ui.label(0, 18, "RACE TO ZERO", {size = 32, color = "text", w = ui.W, align = "center"})
-  ui.label(0, 56, "a DoubleZero game", {size = 12, color = 0x3FF5E0, w = ui.W, align = "center"})
-  V.menu = {
-    {id = "play", l = ui.label(0, 80, "", {size = 14, w = ui.W, align = "center"}), text = "RUN"},
-    {id = "help", l = ui.label(0, 100, "", {size = 14, w = ui.W, align = "center"}), text = "HOW TO PLAY"},
-  }
-  V.sel = 1
-  for n, it in ipairs(V.menu) do
-    local on = n == V.sel
-    it.l:text((on and "> " or "  ") .. it.text .. (on and " <" or "  "))
-    it.l:color(on and 0x14F195 or "dim")
-  end
-  if save.best > 0 then
-    ui.label(0, 124, "BEST " .. save.best .. " ms", {size = 12, color = 0xFFD166, w = ui.W, align = "center"})
-  end
-  ui.hint("UP/DOWN choose   SELECT open   CANCEL exit")
+-- ------------------------------------------------------------------ share on X (a QR the phone scans)
+local function urlenc(s)
+  return (s:gsub("[^%w%-%._~]", function(c)
+    if c == " " then return "+" end
+    return string.format("%%%02X", string.byte(c))
+  end))
 end
+
+show_share = function()
+  scene = "share"
+  ui.clear()
+  ui.bg(0x0B1030)
+  local r = last_run or {score = save.best, lap = save.best_lap, tunnels = 0}
+  local text = "I saved " .. r.score .. " ms on the DoubleZero fiber in Race to Zero on my Breakpoint badge."
+    .. " Lap " .. r.lap .. ", outran the shark. @doublezero @SolanaFndn race.speedlab.pro"
+  local url = "https://x.com/intent/post?text=" .. urlenc(text)
+  ui.label(8, 10, "SHARE", {size = 20, color = "text"})
+  ui.label(8, 40, "Scan with", {size = 12, color = "dim"})
+  ui.label(8, 54, "your phone:", {size = 12, color = "dim"})
+  ui.label(8, 68, "X opens with", {size = 12, color = "dim"})
+  ui.label(8, 82, "the post ready.", {size = 12, color = "dim"})
+  ui.label(8, 110, r.score .. " ms", {size = 20, color = 0xFFD166})
+  ui.label(8, 136, "lap " .. r.lap, {size = 12, color = "dim"})
+  if ui.qr then
+    local ok = pcall(ui.qr, 112, 6, 204, url)
+    if not ok then ui.label(112, 100, "QR too long", {size = 12, color = "pink"}) end
+  else
+    ui.label(112, 90, "Update Solana OS", {size = 14, color = "pink"})
+    ui.label(112, 110, "to show the QR", {size = 14, color = "pink"})
+  end
+  ui.hint("SELECT or CANCEL back")
+end
+
+-- ------------------------------------------------------------------ leaderboard screen
+local lb = {when = "all", gen = 0}
+
+local function lb_show(ok, res, gen)
+  if scene ~= "lb" or gen ~= lb.gen then return end
+  if not ok then lb.status:text(LB_ERR[res] or ("Error: " .. tostring(res))) return end
+  local data = type(res) == "table" and res.status == 200 and json.decode(res.body)
+  if type(data) ~= "table" or type(data.top) ~= "table" then
+    lb.status:text("Server said " .. tostring(type(res) == "table" and res.status))
+    return
+  end
+  lb.status:text(#data.top == 0 and (lb.when == "today" and "No runs today. Be the first!" or "No runs yet. Be the first!") or "")
+  for n = 1, 10 do
+    local r = data.top[n]
+    if type(r) == "table" then
+      lb.rows[n]:text(string.format("%2d %-16s %8d  L%d", int_or(r.r, 1, 999999, n),
+        tostring(r.n):sub(1, 16), int_or(r.s, 0, 5000000, 0), int_or(r.l, 1, 999, 1)))
+    else
+      lb.rows[n]:text("")
+    end
+  end
+  if type(data.me) == "table" then
+    lb.me:text("YOU  #" .. int_or(data.me.r, 1, 999999, 0) .. "   " .. int_or(data.me.s, 0, 5000000, 0) .. " ms")
+  else
+    lb.me:text(lb.when == "today" and "Run today to get on this board" or "Finish a run to get on the board")
+  end
+end
+
+local function lb_fetch()
+  lb.gen = lb.gen + 1
+  local gen = lb.gen
+  lb.tab:text(lb.when == "all" and "< ALL TIME >  today" or "  all time  < TODAY >")
+  for n = 1, 10 do lb.rows[n]:text("") end
+  lb.me:text("")
+  lb.status:text("Loading...")
+  if not http then lb.status:text("This badge has no http yet") return end
+  http.get(LB .. "/top?n=10&when=" .. lb.when, function(ok, res) lb_show(ok, res, gen) end)
+end
+
+show_lb = function(back)
+  lb_back = back or "title"
+  scene = "lb"
+  ui.clear()
+  ui.bg(0x0B1030)
+  ui.label(8, 4, "LEADERBOARD", {size = 20, color = "text"})
+  lb.tab = ui.label(150, 10, "", {size = 12, color = 0x3FF5E0})
+  ui.label(8, 30, " # PLAYER             MS SAVED  LAP", {size = 12, color = "dim"})
+  lb.rows = {}
+  for n = 1, 10 do
+    lb.rows[n] = ui.label(8, 46 + (n - 1) * 14, "", {size = 12, color = n <= 3 and 0xFFD166 or "text"})
+  end
+  lb.status = ui.label(0, 100, "", {size = 14, color = "dim", w = ui.W, align = "center"})
+  lb.me = ui.label(0, 188, "", {size = 12, color = 0x14F195, w = ui.W, align = "center"})
+  ui.hint("LEFT/RIGHT all time/today   SELECT refresh   CANCEL back")
+  lb_fetch()
+end
+
+-- ------------------------------------------------------------------ stats and achievements
+local function fmt_time(secs)
+  local h, m = floor(secs / 3600), floor(secs / 60) % 60
+  return h > 0 and (h .. "h " .. m .. "m") or (m .. "m " .. secs % 60 .. "s")
+end
+
+show_stats = function()
+  scene = "stats"
+  ui.clear()
+  ui.bg(0x0B1030)
+  ui.label(8, 4, "STATS", {size = 20, color = "text"})
+  local lines = {
+    {"best", save.best .. " ms"}, {"runs", save.runs},
+    {"best lap", save.best_lap}, {"time", fmt_time(save.secs)},
+    {"saved", save.total .. " ms"}, {"tunnels", save.tunnels},
+    {"coins", save.coins}, {"bits", save.bits},
+  }
+  for i, l in ipairs(lines) do
+    local x = (i % 2 == 1) and 8 or 168
+    local y = 32 + floor((i - 1) / 2) * 14
+    ui.label(x, y, string.format("%-9s %s", l[1], tostring(l[2])), {size = 12, color = "text"})
+  end
+  local got = 0
+  for _, a in ipairs(ACH) do if save.ach[a.id] then got = got + 1 end end
+  ui.label(8, 92, "ACHIEVEMENTS " .. got .. "/" .. #ACH, {size = 14, color = 0xFFD166})
+  for i, a in ipairs(ACH) do
+    local on = save.ach[a.id]
+    local x = (i <= 6) and 8 or 168
+    local y = 112 + ((i - 1) % 6) * 14
+    ui.label(x, y, (on and "[x] " or "[ ] ") .. a.name, {size = 12, color = on and 0x14F195 or "dim"})
+  end
+  ui.hint("SELECT or CANCEL back")
+end
+
+-- ------------------------------------------------------------------ settings
+local set_sel = 1
+local set_rows = {}
+local function settings_draw()
+  local texts = {
+    "LEDS: " .. (settings.leds and "ON" or "OFF"),
+    "NAME ON BOARD: " .. (settings.name and lb_name() or "ANON"),
+    "RESET STATS",
+  }
+  for n, l in ipairs(set_rows) do
+    local on = n == set_sel
+    l:text((on and "> " or "  ") .. texts[n])
+    l:color(on and 0x14F195 or "text")
+  end
+end
+
+show_settings = function()
+  scene = "settings"
+  ui.clear()
+  ui.bg(0x0B1030)
+  ui.label(8, 4, "SETTINGS", {size = 20, color = "text"})
+  set_rows = {}
+  for n = 1, 3 do set_rows[n] = ui.label(16, 44 + (n - 1) * 24, "", {size = 14}) end
+  ui.label(16, 130, "The board shows your X handle from My Badge,", {size = 12, color = "dim"})
+  ui.label(16, 144, "or ANON if you turn it off.", {size = 12, color = "dim"})
+  settings_draw()
+  ui.hint("UP/DOWN choose   SELECT change   CANCEL back")
+end
+
+local function settings_select()
+  if set_sel == 1 then
+    settings.leds = not settings.leds
+    if not settings.leds then for n = 1, 8 do if has_led then led.hex(n, 0) end end led_now = {} end
+  elseif set_sel == 2 then
+    settings.name = not settings.name
+  else
+    ui.confirm("Reset your stats, best and achievements?", function(yes)
+      if yes then
+        save = {best = 0, runs = 0, total = 0, tunnels = 0, coins = 0, bits = 0, best_lap = 0, secs = 0, ach = {}}
+        persist()
+        ui.toast("Stats reset")
+      end
+    end)
+    return
+  end
+  save_settings()
+  settings_draw()
+end
+
+-- ------------------------------------------------------------------ title
+local MENU = {
+  {id = "play", text = "RUN"}, {id = "lb", text = "LEADERBOARD"}, {id = "stats", text = "STATS"},
+  {id = "help", text = "HOW TO PLAY"}, {id = "settings", text = "SETTINGS"},
+}
+local KONAMI = {"up", "up", "down", "down", "left", "right", "left", "right"}
+local GM = {"left", "right", "left", "right", "up", "up"}
+local keylog = {}
 
 local function title_draw_menu()
   for n, it in ipairs(V.menu) do
@@ -841,39 +1240,97 @@ local function title_draw_menu()
   end
 end
 
+local function ends_with(seq)
+  if #keylog < #seq then return false end
+  for i = 1, #seq do
+    if keylog[#keylog - #seq + i] ~= seq[i] then return false end
+  end
+  return true
+end
+
+local function title_mode_text()
+  V.mode:text(ibrl and "IBRL MODE ON" or "")
+end
+
+show_title = function()
+  scene = "title"
+  paused = false
+  demo = false
+  S = nil
+  ui.clear()
+  ui.bg(0x000000)
+  V = {}
+  overlay = {}
+  build_backdrop(1)
+  V.t = 0
+  V.idle = 0
+  V.gm = 0
+  V.hero = ui.image(36, GY - 28, IMG.traderRun1, {scale = U})
+  V.shark = ui.image(4, GY + 12, IMG.shark1, {scale = U})
+  -- a dark plate behind the menu so it reads over the city
+  ui.rect(84, 60, 152, 94, {color = 0x0B1030})
+  ui.gradient(84, 60, 152, 2)
+  ui.gradient(84, 152, 152, 2)
+  ui.label(0, 10, "RACE TO ZERO", {size = 32, color = "text", w = ui.W, align = "center"})
+  ui.label(0, 46, "a DoubleZero game", {size = 12, color = 0x3FF5E0, w = ui.W, align = "center"})
+  V.menu = {}
+  for n, it in ipairs(MENU) do
+    V.menu[n] = {id = it.id, text = it.text, l = ui.label(0, 66 + (n - 1) * 18, "", {size = 14, w = ui.W, align = "center"})}
+  end
+  V.sel = V.sel or 1
+  title_draw_menu()
+  if save.best > 0 then
+    ui.label(0, 160, "BEST " .. save.best .. " ms", {size = 12, color = 0xFFD166, w = ui.W, align = "center"})
+  end
+  V.mode = ui.label(220, 160, "", {size = 12, color = 0xFFD166})
+  title_mode_text()
+  ui.hint("UP/DOWN choose   SELECT open   CANCEL exit")
+  flush_pending()
+end
+
 local function title_tick(dt)
   V.t = V.t + dt
+  V.idle = V.idle + dt
   local t = V.t
   V.hero:set(IMG["traderRun" .. (floor(t * 8) % 2 + 1)])
   V.shark:set(IMG["shark" .. (floor(t * 5) % 2 + 1)])
-  V.shark:pos(100 + floor(math.sin(t * 2) * 6), GY + 12)
+  V.shark:pos(4 + floor(math.sin(t * 2) * 6), GY + 12)
   local off = floor(t * 120) % 64
   for i, p in ipairs(V.pulses) do p:pos((i - 1) * 64 - off + 64, GY + 1) end
-  for n = 1, 8 do
-    local ph = (floor(t * 8) + n) % 4
-    led_put(n, ph == 0 and 0x3FF5E0 or 0)
+  if V.gm > 0 then
+    V.gm = V.gm - dt
+    for n = 1, 8 do led_put(n, (floor(t * 20) + n) % 2 == 0 and 0xFFFFFF or 0x14F195) end
+  else
+    for n = 1, 8 do
+      local ph = (floor(t * 8) + n) % 4
+      led_put(n, ph == 0 and (ibrl and 0xFFD166 or 0x3FF5E0) or 0)
+    end
   end
+  -- left alone: the autopilot shows the game
+  if V.idle > 12 then start_run(true) end
 end
 
 show_help = function()
   scene = "help"
   ui.clear()
   ui.bg(0x0B1030)
-  ui.label(0, 6, "HOW TO PLAY", {size = 20, color = "text", w = ui.W, align = "center"})
+  ui.label(0, 4, "HOW TO PLAY", {size = 20, color = "text", w = ui.W, align = "center"})
   local lines = {
-    {"UP or SELECT: jump. The shark bites the cable from below:", "text"},
-    {"two hits and you are out.", "text"},
-    {"Fog = the public internet. A venue coin connects you to DZ:", "dim"},
-    {"  S Solana: score x2     K Kalshi: speed", 0x9945FF},
-    {"  H Hyperliquid: no fog  P Phoenix: shield", 0x97FCE4},
-    {"All four open the DZ TUNNEL: no obstacles, score x3,", 0x14F195},
-    {"and one shark bite is forgiven.", 0x14F195},
-    {"Small coins in a row raise the combo up to x5.", 0xFFD166},
-    {"Grass slows you down. 5 worlds make a lap,", "dim"},
-    {"every lap is faster. Secrets hide in the run.", "dim"},
+    {"UP/SELECT jump, hold it: higher.", "text"},
+    {"The shark bites the cable:", "text"},
+    {"two bites and you are out.", "text"},
+    {"Fog = public internet. Coins = DZ:", "dim"},
+    {" S Solana    score x2", 0x9945FF},
+    {" K Kalshi    speed", 0x00D18C},
+    {" H Hyperliquid no fog, Hypurr", 0x97FCE4},
+    {" P Phoenix   shield", 0xFF7A45},
+    {"All 4: DZ TUNNEL, score x3.", 0x14F195},
+    {"Coins in a row: combo to x5.", 0xFFD166},
+    {"5 worlds = a lap, each faster.", "dim"},
+    {"Secrets hide everywhere.", "dim"},
   }
   for i, ln in ipairs(lines) do
-    ui.label(8, 34 + (i - 1) * 17, ln[1], {size = 12, color = ln[2]})
+    ui.label(8, 28 + (i - 1) * 14, ln[1], {size = 12, color = ln[2]})
   end
   ui.hint("SELECT or CANCEL back")
 end
@@ -881,22 +1338,72 @@ end
 -- ================================================================== host callbacks
 function on_key(key, rep)
   if scene == "title" then
+    V.idle = 0
     if key == "back" then leds_off() return false end
-    if key == "up" or key == "down" then
+    if not rep then
+      keylog[#keylog + 1] = key
+      if #keylog > 10 then table.remove(keylog, 1) end
+      if ends_with(KONAMI) then
+        ibrl = not ibrl
+        keylog = {}
+        title_mode_text()
+        ui.toast(ibrl and "IBRL MODE: everything faster" or "IBRL MODE off")
+        flash(0xFFD166, 0.4)
+      elseif ends_with(GM) then
+        keylog = {}
+        V.gm = 2
+        ui.toast("gm")
+      end
+    end
+    if key == "up" then
+      V.sel = (V.sel - 2) % #V.menu + 1
+      title_draw_menu()
+    elseif key == "down" then
       V.sel = V.sel % #V.menu + 1
       title_draw_menu()
     elseif key == "select" then
-      if V.menu[V.sel].id == "play" then start_run() else show_help() end
+      local id = V.menu[V.sel].id
+      if id == "play" then start_run(false)
+      elseif id == "lb" then show_lb("title")
+      elseif id == "stats" then show_stats()
+      elseif id == "settings" then set_sel = 1 show_settings()
+      else show_help() end
     end
     return true
-  elseif scene == "help" then
+  elseif scene == "help" or scene == "stats" then
+    if key == "select" or key == "back" then show_title() end
+    return true
+  elseif scene == "settings" then
+    if key == "back" then show_title()
+    elseif key == "up" then set_sel = (set_sel - 2) % #set_rows + 1 settings_draw()
+    elseif key == "down" then set_sel = set_sel % #set_rows + 1 settings_draw()
+    elseif key == "select" then settings_select() end
+    return true
+  elseif scene == "lb" then
+    if key == "back" then
+      show_title()
+    elseif key == "left" or key == "right" then
+      lb.when = lb.when == "all" and "today" or "all"
+      lb_fetch()
+    elseif key == "select" then lb_fetch() end
+    return true
+  elseif scene == "share" then
     if key == "select" or key == "back" then show_title() end
     return true
   elseif scene == "over" then
     if over_t > 0 then return true end
-    if key == "select" then start_run() elseif key == "back" then leds_off() show_title() end
+    if key == "select" then start_run(false)
+    elseif key == "up" then show_share()
+    elseif key == "down" then show_lb("over")
+    elseif key == "back" then leds_off() show_title() end
+    return true
+  elseif scene == "dying" then
     return true
   elseif scene == "play" then
+    if demo then
+      if not rep then leds_off() show_title() end
+      return true
+    end
     if paused then
       if key == "select" then set_pause(false)
       elseif key == "back" and not rep then
@@ -920,29 +1427,37 @@ function on_tick(ms)
   local dt = min(ms, 100) / 1000
   if scene == "play" and S and not paused then
     acc = min(acc + ms, STEP_MS * MAX_STEPS)
+    local h = not demo and held()
     while acc >= STEP_MS do
       acc = acc - STEP_MS
-      step(S, jump_req)
+      local j = jump_req
+      if demo then j = autopilot(S) end
+      step(S, j, h)
       jump_req = false
       if S.over then break end
     end
     handle_events(S)
     draw(S, dt)
     update_leds(S, dt)
+    if V.ach_dirty and not demo then V.ach_dirty = false persist() end
     if S.over then
       scene = "dying"
-      over_t = 1.2
+      over_t = 1.4
+      -- the cable snaps where the shark bit
+      V.gap = ui.rect(sx(PLAYER_X) - 6, GY, 30, 4, {color = A.worlds[S.wi].earth})
+      V.spark = ui.label(sx(PLAYER_X) - 2, GY - 14, "*", {size = 20, color = 0xFFD166})
     end
   elseif scene == "dying" then
     -- the shark leaps out of the ground and takes the trader
     over_t = over_t - dt
-    local k = 1 - over_t / 1.2
-    V.shark.obj:pos(floor(sx(PLAYER_X) - 20 + k * 20), floor(GY + 12 - math.sin(k * math.pi) * 60))
-    V.player.obj:pos(sx(PLAYER_X), floor(sy(S.y) - 28 - k * 40))
+    local k = min(1, 1 - over_t / 1.4)
+    V.shark.obj:pos(floor(sx(PLAYER_X) - 24 + k * 28), floor(GY + 12 - math.sin(k * math.pi) * 64))
+    V.player.obj:pos(sx(PLAYER_X) + floor(k * 30), floor(sy(S.y) - 28 - math.sin(k * math.pi * 0.8) * 50 + k * k * 40))
+    V.spark:color((floor(over_t * 16) % 2 == 0) and 0xFFD166 or 0xFF3D6E)
     for n = 1, 8 do led_put(n, (floor(over_t * 12) % 2 == 0) and 0xFF0000 or 0) end
     if over_t <= 0 then
       leds_off()
-      show_over()
+      if demo then show_title() else show_over() end
     end
   elseif scene == "over" then
     if over_t > 0 then over_t = over_t - dt end
@@ -952,8 +1467,9 @@ function on_tick(ms)
 end
 
 function on_exit()
-  if S and scene == "play" then finish_run() end
+  if S and scene == "play" and not demo then finish_run() end
   leds_off()
 end
 
+if sys.tick then sys.tick(17) end  -- every frame of the 60 Hz screen (Solana OS 2.3.0+)
 show_title()

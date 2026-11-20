@@ -8,7 +8,7 @@ A.worlds = {
   {id="singapore", name="SINGAPORE", sky=0x180D2C, earth=0x0E0719, F=0x2E1C52, L=0xFF8AD8, S=0x6A5A90},
   {id="london", name="LONDON", sky=0x10151F, earth=0x090C12, F=0x222C3C, L=0xF2C9A0, S=0x5C6678},
 }
-A.themes = {S=0x23104A, K=0x003826, H=0x08362F, P=0x3A1606, T=0x12062A}
+A.themes = {S=0x23104A, K=0x003826, H=0x08362F, P=0x3A1606, T=0x12062A, Z=0x2E2408}
 A.s = {
   anchor1 = {"....g....","...gkg...","....g....",".ggggggg.","....g....","....g....","....g....","g...g...g","gg..g..gg",".gg.g.gg.","..ggggg.."},
   bigBen = {"..............","......gg......","......gg......",".....gggg.....",".....gggg.....","....gggggg....","....gggggg....","...gggggggg...","...gggggggg...","..gggggggggg..",".gggggggggggg.","..eewwwwwwee..","..eewwwkwwee..","..eewwykwwee..","..eewwwwwwee..","..eewwwwwwee..","..eewwwwwwee..",".gggggggggggg.","..eeeeeeeeee..","..eeeeeeeeee..","..eenneennee..","..eenneennee..","..eenneennee..","..eeeeeeeeee..","..eeeeeeeeee..","..eenneennee..","..eenneennee..","..eenneennee..","..eeeeeeeeee..","..eeeeeeeeee..","..eenneennee..","..eenneennee..","..eenneennee..","..eeeeeeeeee..","..eeeeeeeeee..","..eenneennee..","..eenneennee..","..eenneennee..","..eeeeeeeeee..","..eeeeeeeeee..","..eenneennee..","..eenneennee..","..eenneennee..","..eeeeeeeeee..","..eeeeeeeeee..","..eenneennee..","..eenneennee..","..eenneennee..","..eeeeeeeeee..","..eeeeeeeeee..","..eenneennee..","..eenneennee..","..eenneennee..","..eeeeeeeeee..","..eeeeeeeeee..","..eenneennee..","..eenneennee..","..eenneennee..","..eeeeeeeeee..","..eeeeeeeeee.."},
@@ -78,5 +78,6 @@ A.p = {
   far3 = {F=0x0E3050, L=0x3FF5E0, S=0x4D7598},
   far4 = {F=0x2E1C52, L=0xFF8AD8, S=0x6A5A90},
   far5 = {F=0x222C3C, L=0xF2C9A0, S=0x5C6678},
+  merlionStatue = {e=0x6A6F8C, w=0x8A90AA, g=0x3A4060, c=0x2A6A80},
 }
 return A

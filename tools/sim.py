@@ -1,4 +1,4 @@
-"""Headless FORK BOMB runner: a mock of the badge's Lua API (Python side), a bot that
+"""Headless runner (from FORK BOMB): a mock of the badge's Lua API (Python side), a bot that
 plays, an instruction counter per callback, and PNG screenshots of the emulated screen.
 
   .venv/bin/python tools/sim.py [--seconds 120] [--seed 1] [--stage 1] [--shots out]
@@ -249,6 +249,10 @@ function ui.canvas(x, y, w, h, o)
   end})
 end
 function ui.hint(t) PY.hint(t) end
+function ui.qr(x, y, size, text)
+  assert(#text <= 256, "qr text too long")
+  return obj(PY.new("rect", x, y, size, size, {color = 0xFFFFFF}))
+end
 function ui.toast(t) PY.toast(t) end
 function ui.clear() PY.clear() end
 function ui.confirm(t, cb) cb(true) end
@@ -262,6 +266,7 @@ function sys.millis() return PY.millis() end
 function sys.keys() return PY.keys() end
 function sys.memory() return {used = math.floor(collectgarbage("count") * 1024), max = 6291456} end
 function sys.exit() end
+function sys.tick(ms) return 30 end
 function sys.time() return PY.now() end
 badge = {}
 function badge.owner() return "@val" end

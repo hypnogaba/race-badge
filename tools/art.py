@@ -31,7 +31,7 @@ WORLDS = [
 ]
 
 # Sky tint while a venue bonus is on (last coin taken), and in the DZ tunnel.
-THEMES = {"S": 0x23104A, "K": 0x003826, "H": 0x08362F, "P": 0x3A1606, "T": 0x12062A}
+THEMES = {"S": 0x23104A, "K": 0x003826, "H": 0x08362F, "P": 0x3A1606, "T": 0x12062A, "Z": 0x2E2408}
 
 sprites = {}   # name -> rows
 palettes = {}  # name -> palette overrides (only letters that differ from PAL)
@@ -88,6 +88,8 @@ add("brokenPixel1", bp["frames"][0], bp["pal"])
 
 for name in ("bigBen", "bus", "mbs", "merlionStatue", "candles", "skyline"):
     add(name, SRC["LANDMARKS"][name]["frames"][0])
+# the statue stands by the cable: dim it so it never reads as an obstacle
+palettes["merlionStatue"] = {"e": 0x6A6F8C, "w": 0x8A90AA, "g": 0x3A4060, "c": 0x2A6A80}
 
 # ------------------------------------------------------------------ new obstacles (face left, bottom = cable)
 add("router1", [
