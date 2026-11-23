@@ -2,10 +2,18 @@
 
 The badge version of the DoubleZero runner [race.speedlab.pro](https://race.speedlab.pro):
 a trader runs along the fiber, a shark bites the cable from below (two bites and you are out),
-the public internet fogs the view, and four Edge venue coins (Solana, Kalshi, Hyperliquid, Phoenix)
+London on the horizon, and four Edge venue coins (Solana, Kalshi, Hyperliquid, Phoenix)
 open the DZ tunnel.
 
 Lua for Solana OS 2.x (ESP32-C5, 320 x 218 screen). Files for the store: `app.json`, `main.lua`, `art.lua`.
+
+## 0.3.1 (23 Nov 2026)
+- No fog at all (Ivan: "better remove it entirely"). The Hyperliquid coin now reads HYPURR MODE
+  (it always turned the trader into Hypurr).
+- London is world 1: the Eye, St Paul's, the Shard and Big Ben passing by. The generic CITY
+  skyline moved to world 5.
+- Secret hints say where: "Start menu: ..." or "In a run: ...", with the start of the key code.
+- Share text names DoubleZero once: "on @doublezero fiber" (was "DoubleZero fiber ... @doublezero").
 
 ## 0.3.0 (23 Nov 2026)
 - Fog: 48 px instead of 80, half as dense, drawn under obstacles and the runner, so threats are

@@ -23,11 +23,11 @@ PAL.update({
 
 # Each world: sky, earth under the cable, far skyline (F), its lights (L), stars (S), cable glow (c).
 WORLDS = [
-    {"id": "city", "name": "CITY", "sky": 0x0B1030, "earth": 0x070B1E, "F": 0x1B2550, "L": 0xC9A24A, "S": 0x5A6390},
+    {"id": "london", "name": "LONDON", "sky": 0x10151F, "earth": 0x090C12, "F": 0x222C3C, "L": 0xF2C9A0, "S": 0x5C6678},
     {"id": "exchange", "name": "EXCHANGE", "sky": 0x07170F, "earth": 0x040E09, "F": 0x123A2A, "L": 0x14F195, "S": 0x3E6B58},
     {"id": "ocean", "name": "OCEAN", "sky": 0x051A2E, "earth": 0x03101E, "F": 0x0E3050, "L": 0x3FF5E0, "S": 0x4D7598},
     {"id": "singapore", "name": "SINGAPORE", "sky": 0x180D2C, "earth": 0x0E0719, "F": 0x2E1C52, "L": 0xFF8AD8, "S": 0x6A5A90},
-    {"id": "london", "name": "LONDON", "sky": 0x10151F, "earth": 0x090C12, "F": 0x222C3C, "L": 0xF2C9A0, "S": 0x5C6678},
+    {"id": "city", "name": "CITY", "sky": 0x0B1030, "earth": 0x070B1E, "F": 0x1B2550, "L": 0xC9A24A, "S": 0x5A6390},
 ]
 
 # Sky tint while a venue bonus is on (last coin taken), and in the DZ tunnel.
@@ -154,21 +154,7 @@ add("zero1", [
     ".YYYY..YYYY.",
 ])
 
-# ------------------------------------------------------------------ fog: a light haze at the far edge
-# 0.3.0: was 40 px wide (80 on screen, a quarter of the view) and drawn over the obstacles.
-# Now 24 px (48 on screen), at most half the checker filled, drawn under everything that moves.
-FOG_W, FOG_H = 24, 77
-fog = []
-frnd = random.Random(5)
-for y in range(FOG_H):
-    row = ""
-    for x in range(FOG_W):
-        # thicker towards the right edge; a checker so the skyline still shows through
-        dens = 0.05 + 0.5 * (x / (FOG_W - 1)) ** 1.2
-        on = (x + y) % 2 == 0 and frnd.random() < dens
-        row += "f" if on else "."
-    fog.append(row)
-add("fog", fog)
+# (the fog of the public internet was removed in 0.3.1: Ivan, "better remove it entirely")
 
 # ------------------------------------------------------------------ ocean landmarks
 g = Grid(10, 44)
@@ -289,7 +275,7 @@ def london(rnd):
     return g
 
 
-for wi, fn in enumerate((city, exchange, ocean, singapore, london)):
+for wi, fn in enumerate((london, exchange, ocean, singapore, city)):   # London first (Nov 2026)
     w = WORLDS[wi]
     add(f"far{wi + 1}", fn(random.Random(wi * 31 + 7)).rows(), {"F": w["F"], "L": w["L"], "S": w["S"]})
 

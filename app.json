@@ -1,9 +1,9 @@
 {
   "id": "fiber-run",
   "name": "Fiber Run",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "author": "@hypnogaba",
-  "summary": "Outrun the shark on the DoubleZero fiber: open the DZ tunnel, find 6 secrets, earn !LAMPs.",
+  "summary": "Outrun the shark on DoubleZero fiber past London: open the DZ tunnel, find 6 secrets, earn !LAMPs.",
   "icon": "play",
   "accent": "3FF5E0",
   "category": "games",

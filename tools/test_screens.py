@@ -33,9 +33,7 @@ function __is_gold() local i = V.player.img return i == IMG.gold_traderRun1 or i
 function __IMG() return IMG end
 function __SIZE() return SIZE end
 function __unlock(id) unlock(id, S) end
-function __fog_drawn_under()   -- the fog image is created (drawn) before the obstacles and the player
-  return V.fog.obj._id < V.obs[1].obj._id and V.fog.obj._id < V.player.obj._id
-end
+function __world_names() return WORLD_NAME end
 """
 
 fails = 0
@@ -191,8 +189,8 @@ g(r2, "__share")
 t = cap.get("t", "")
 check("QR text fits 256 bytes with the biggest numbers", 0 < len(t) <= 256)
 txt = unquote_plus(t.split("text=", 1)[1]) if "text=" in t else ""
-check("post text names the score, @doublezero, @SolanaFndn and the link",
-      "4999999 ms" in txt and "@doublezero" in txt and "@SolanaFndn" in txt and "race.speedlab.pro" in txt and "Fiber Run" in txt and "zero" not in txt.lower().replace("doublezero",""))
+check("post text names the score, @doublezero once, @SolanaFndn and the link",
+      "4999999 ms" in txt and txt.lower().count("doublezero") == 1 and "@doublezero" in txt and "@SolanaFndn" in txt and "race.speedlab.pro" in txt and "Fiber Run" in txt)
 print("   QR:", len(t), "bytes:", txt)
 
 # ---------------------------------------------------------------- server refused / offline: pending score
@@ -345,7 +343,7 @@ g(r, "__V").sel = menu_ids.index("secrets") + 1
 r.key("select")
 check("secrets screen opens", g(r, "__scene") == "secrets")
 check("found secret shows how", has_text(r, "UP UP DOWN DOWN LEFT RIGHT LEFT RIGHT"))
-check("unfound secret shows a hint", has_text(r, "Last a minute, then jump high for gold."))
+check("unfound secret shows a hint", has_text(r, "In a run: after 60 s, jump high for a gold 00."))
 shot(r, "20_secrets")
 r.key("back")
 check("back to the title", g(r, "__scene") == "title")
@@ -388,14 +386,13 @@ for k in ("left", "right", "left", "right", "up", "up"):
     capped.key(k)
 check("capped: not stored as paid", capped.m.storage.get("spaid") is None)
 
-# the fog sits under the obstacles and is a narrow haze
+# 0.3.1: no fog at all, London is the first world
 r = Runner(25, expose=EXPOSE)
 g(r, "__start")
-fog_w = g(r, "__SIZE").fog[1] * 2
-check("fog is at most 48 px wide (was 80)", fog_w <= 48)
-order = list(r.m.order) if hasattr(r.m, "order") else []
-fog_id = g(r, "__V").fog.obj
-check("fog is drawn under the obstacles", g(r, "__fog_drawn_under") is True)
+check("no fog object in a run", g(r, "__V").fog is None)
+check("no fog sprite in the art", g(r, "__IMG")["fog"] is None)
+check("world 1 is LONDON", g(r, "__world_names")[1] == "LONDON")
+check("world 5 is CITY", g(r, "__world_names")[5] == "CITY")
 
 print("max instructions per callback:", r.maxi)
 print(f"FAILED {fails}" if fails else "all passed")
