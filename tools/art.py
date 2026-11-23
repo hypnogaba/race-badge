@@ -154,15 +154,17 @@ add("zero1", [
     ".YYYY..YYYY.",
 ])
 
-# ------------------------------------------------------------------ fog: a checker that lets threats show through
-FOG_W, FOG_H = 40, 77
+# ------------------------------------------------------------------ fog: a light haze at the far edge
+# 0.3.0: was 40 px wide (80 on screen, a quarter of the view) and drawn over the obstacles.
+# Now 24 px (48 on screen), at most half the checker filled, drawn under everything that moves.
+FOG_W, FOG_H = 24, 77
 fog = []
 frnd = random.Random(5)
 for y in range(FOG_H):
     row = ""
     for x in range(FOG_W):
-        # denser towards the right edge; a checker so threats still show through
-        dens = 0.1 + 0.9 * (x / (FOG_W - 1)) ** 0.8
+        # thicker towards the right edge; a checker so the skyline still shows through
+        dens = 0.05 + 0.5 * (x / (FOG_W - 1)) ** 1.2
         on = (x + y) % 2 == 0 and frnd.random() < dens
         row += "f" if on else "."
     fog.append(row)

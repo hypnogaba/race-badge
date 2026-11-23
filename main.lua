@@ -83,6 +83,14 @@ do
     IMG[name] = ui.load(rows, {palette = pal})
     SIZE[name] = {#rows[1], #rows}
   end
+  -- GOLD TRADER (all six secrets): the trader in gold
+  local gold = {}
+  for k, v in pairs(A.pal) do gold[k] = v end
+  gold.b, gold.c, gold.n = 0xFFD166, 0xFFF3B0, 0xC9962E
+  for _, name in ipairs({"traderRun1", "traderRun2", "traderJump1"}) do
+    IMG["gold_" .. name] = ui.load(A.s[name], {palette = gold})
+    SIZE["gold_" .. name] = SIZE[name]
+  end
   for name in pairs(A.s) do
     local base, n = name:match("^(.-)(%d+)$")
     if base and tonumber(n) > (NFR[base] or 0) then NFR[base] = tonumber(n) end
@@ -115,7 +123,7 @@ local ACH = {  -- achievements, in the order the stats screen lists them
 }
 
 local save = {best = 0, runs = 0, total = 0, tunnels = 0, coins = 0, bits = 0, best_lap = 0, secs = 0, ach = {}}
-local settings = {leds = true, name = true}
+local settings = {leds = true, name = true, gold = false}
 do
   local v = storage.get("save")
   if type(v) == "table" then
@@ -130,13 +138,14 @@ do
   if type(st) == "table" then
     if st.leds == false then settings.leds = false end
     if st.name == false then settings.name = false end
+    if st.gold == true then settings.gold = true end
   end
 end
 local function persist()
   storage.set("save", save)
 end
 local function save_settings()
-  storage.set("settings", {leds = settings.leds, name = settings.name})
+  storage.set("settings", {leds = settings.leds, name = settings.name, gold = settings.gold})
 end
 
 -- ------------------------------------------------------------------ LEDs
@@ -194,16 +203,110 @@ local function award(key)
       return
     end
     if not ok then return end
-    lamp_session[skey] = true
-    if type(r) == "table" and (tonumber(r.awarded) or 0) > 0 then
-      ui.toast("+" .. floor(r.awarded) .. " !LAMP" .. (r.awarded > 1 and "s" or "") .. "  " .. reason)
-    end
+    lamp_session[skey] = true      -- not again this session
+    local got = type(r) == "table" and (tonumber(r.awarded) or 0) or 0
+    if got <= 0 then return end    -- capped: a later launch today may still be paid
+    ui.toast("+" .. floor(got) .. " !LAMP" .. (got > 1 and "s" or "") .. "  " .. reason)
     local now = lamp_log()
     if now and now.day == day then
       now.got[key] = true
       storage.set("lamps", now)
     end
   end)
+end
+
+-- ------------------------------------------------------------------ secrets
+-- Six secrets, listed with hints under SECRETS on the title. Each one found pays
+-- 1 !LAMP once ever; all six pay 3 more and unlock the GOLD TRADER.
+local SEC = {}   -- everything about secrets in one table (Lua allows 200 locals in a chunk)
+do
+local SECRETS = {
+  {id = "ibrl", name = "IBRL MODE", hint = "Title: the oldest cheat code in games.",
+    how = "UP UP DOWN DOWN LEFT RIGHT LEFT RIGHT"},
+  {id = "gm", name = "GM", hint = "Title: wiggle twice, then look up twice.",
+    how = "LEFT RIGHT LEFT RIGHT UP UP"},
+  {id = "hypurr", name = "HYPURR", hint = "With Hyperliquid on, a cat crosses the cable.",
+    how = "grab the cat while H is on: +250"},
+  {id = "zero", name = "DOUBLEZERO", hint = "Last a minute, then jump high for gold.",
+    how = "gold 00 after 60 s, up high: +500"},
+  {id = "pixel", name = "BROKEN PIXEL", hint = "Something on the cable glitches. Grab it.",
+    how = "a rare glitching pixel: +100"},
+  {id = "k10", name = "LIGHT SPEED", hint = "Save 10 000 ms in one run. Look up.",
+    how = "10 000 ms in one run: the sky turns gold"},
+}
+local LAMP_SECRET, LAMP_ALL_SECRETS = 1, 3
+local found, paid, secret_tried = {}, {}, {}
+do
+  local v = storage.get("secrets")
+  if type(v) == "table" then
+    for _, it in ipairs(SECRETS) do if v[it.id] == true then found[it.id] = true end end
+  end
+  -- players from 0.2.0 already found some: their achievements count
+  for _, id in ipairs({"ibrl", "hypurr", "zero", "pixel", "k10"}) do
+    if save.ach[id] then found[id] = true end
+  end
+  local p = storage.get("spaid")
+  if type(p) == "table" then
+    for k, x in pairs(p) do if x == true and type(k) == "string" then paid[k] = true end end
+  end
+end
+
+local function secrets_count()
+  local n = 0
+  for _, it in ipairs(SECRETS) do if found[it.id] then n = n + 1 end end
+  return n
+end
+local function all_secrets() return secrets_count() == #SECRETS end
+
+-- !LAMPs for a secret, once ever: kept unpaid until the server actually pays
+local function pay_secret(key, amount, reason)
+  if paid[key] or secret_tried[key] or not lamps or not lamps.award or needs_x then return end
+  secret_tried[key] = true
+  lamps.award(amount, reason, function(ok, r)
+    if ok and type(r) == "table" and r.needsX then
+      needs_x = true
+      ui.toast("Link X in My Badge to earn !LAMPs")
+      return
+    end
+    if not ok then secret_tried[key] = nil return end   -- offline: ask again later
+    if type(r) == "table" and (tonumber(r.awarded) or 0) > 0 then
+      paid[key] = true
+      storage.set("spaid", paid)
+      ui.toast("+" .. floor(r.awarded) .. " !LAMP" .. (tonumber(r.awarded) > 1 and "s" or "") .. "  " .. reason)
+    end
+  end)
+end
+
+local function pay_secrets_due()
+  for _, it in ipairs(SECRETS) do
+    if found[it.id] then pay_secret(it.id, LAMP_SECRET, "secret: " .. it.name) end
+  end
+  if all_secrets() then pay_secret("all", LAMP_ALL_SECRETS, "all secrets found") end
+end
+
+-- Marks a secret found and says so. Quiet if it was known already.
+local function find_secret(id)
+  if found[id] then return end
+  found[id] = true
+  storage.set("secrets", found)
+  local name = id
+  for _, it in ipairs(SECRETS) do if it.id == id then name = it.name end end
+  pay_secret(id, LAMP_SECRET, "secret: " .. name)
+  if all_secrets() then
+    pay_secret("all", LAMP_ALL_SECRETS, "all secrets found")
+    settings.gold = true                 -- wear the prize right away
+    save_settings()
+    ui.toast("ALL 6 SECRETS! GOLD TRADER unlocked")
+    flash(0xFFD166, 1.0)
+  else
+    ui.toast("SECRET " .. secrets_count() .. "/" .. #SECRETS .. ": " .. name)
+    flash(0xFF8AD8, 0.4)
+  end
+end
+
+  SEC.list, SEC.found, SEC.count, SEC.all = SECRETS, found, secrets_count, all_secrets
+  SEC.find, SEC.due = find_secret, pay_secrets_due
+  SEC.ach = {ibrl = true, hypurr = true, zero = true, pixel = true, k10 = true}
 end
 
 -- ------------------------------------------------------------------ leaderboard
@@ -666,6 +769,7 @@ local function build_play()
   V = {}
   overlay = {}
   build_backdrop(1)
+  V.fog = slot(IMG.fog)   -- under everything that moves: the haze never hides a threat
   V.grass = {slot(IMG.grass1), slot(IMG.grass1)}
   V.obs = {}
   for i = 1, 6 do V.obs[i] = slot(IMG.lag1) end
@@ -675,7 +779,6 @@ local function build_play()
   V.clones = {slot(IMG.traderRun1), slot(IMG.traderRun1), slot(IMG.traderRun1)}
   V.player = slot(IMG.traderRun1)
   V.shield = slot(IMG.shield1)
-  V.fog = slot(IMG.fog)
   -- HUD
   V.score = ui.label(6, 2, "0", {size = 20, color = 0xFFD166})
   V.unit = ui.label(6, 24, "ms saved", {size = 12, color = "dim"})
@@ -741,7 +844,9 @@ end
 
 -- -------------------------------------------------- achievements
 local function unlock(id, s)
-  if demo or save.ach[id] then return end
+  if demo then return end
+  if SEC.ach[id] then SEC.find(id) end
+  if save.ach[id] then return end
   save.ach[id] = true
   V.ach_dirty = true
   for _, a in ipairs(ACH) do
@@ -897,6 +1002,7 @@ local function draw(s, dt)
   local py = sy(s.y) - 14 * U
   local px = sx(PLAYER_X)
   local pname = s.y < GROUND_Y and "traderJump1" or frame("traderRun", floor(s.dist), 9)
+  if settings.gold then pname = "gold_" .. pname end
   if s.fx.H > 0 then
     -- Hyperliquid: the trader becomes Hypurr (only the picture changes, the hitbox stays)
     pname = frame("hypurr", floor(s.dist), 9)
@@ -922,7 +1028,7 @@ local function draw(s, dt)
   put(V.shark, IMG[frame("shark", s.tick, 10)], shx, shy)
 
   -- fog of the public internet, unless a venue connects you to DZ
-  if connected(s) then hide(V.fog) else put(V.fog, IMG.fog, ui.W - 80, GY - 154) end
+  if connected(s) then hide(V.fog) else put(V.fog, IMG.fog, ui.W - SIZE.fog[1] * U, GY - SIZE.fog[2] * U) end
 
   if V.zero_t and V.zero_t > 0 then V.zero_t = V.zero_t - dt end
   -- banner and popups
@@ -1246,7 +1352,8 @@ end
 -- ------------------------------------------------------------------ title
 local MENU = {
   {id = "play", text = "RUN"}, {id = "lb", text = "LEADERBOARD"}, {id = "stats", text = "STATS"},
-  {id = "help", text = "HOW TO PLAY"}, {id = "settings", text = "SETTINGS"},
+  {id = "help", text = "HOW TO PLAY"}, {id = "secrets", text = "SECRETS"},
+  {id = "settings", text = "SETTINGS"},
 }
 local KONAMI = {"up", "up", "down", "down", "left", "right", "left", "right"}
 local GM = {"left", "right", "left", "right", "up", "up"}
@@ -1255,6 +1362,9 @@ local keylog = {}
 local function title_draw_menu()
   for n, it in ipairs(V.menu) do
     local on = n == V.sel
+    if it.id == "secrets" then
+      it.text = SEC.all() and "SECRETS 6/6 GOLD" or ("SECRETS " .. SEC.count() .. "/" .. #SEC.list)
+    end
     it.l:text((on and "> " or "  ") .. it.text .. (on and " <" or "  "))
     it.l:color(on and 0x14F195 or "dim")
   end
@@ -1288,31 +1398,57 @@ show_title = function()
   V.hero = ui.image(36, GY - 28, IMG.traderRun1, {scale = U})
   V.shark = ui.image(4, GY + 12, IMG.shark1, {scale = U})
   -- a dark plate behind the menu so it reads over the city
-  ui.rect(84, 60, 152, 94, {color = 0x0B1030})
+  ui.rect(84, 60, 152, 98, {color = 0x0B1030})
   ui.gradient(84, 60, 152, 2)
-  ui.gradient(84, 152, 152, 2)
+  ui.gradient(84, 157, 152, 2)
   ui.label(0, 10, "FIBER RUN", {size = 32, color = "text", w = ui.W, align = "center"})
   ui.label(0, 46, "a DoubleZero game", {size = 12, color = 0x3FF5E0, w = ui.W, align = "center"})
   V.menu = {}
   for n, it in ipairs(MENU) do
-    V.menu[n] = {id = it.id, text = it.text, l = ui.label(0, 66 + (n - 1) * 18, "", {size = 14, w = ui.W, align = "center"})}
+    V.menu[n] = {id = it.id, text = it.text, l = ui.label(0, 64 + (n - 1) * 15, "", {size = 14, w = ui.W, align = "center"})}
   end
   V.sel = V.sel or 1
   title_draw_menu()
   if save.best > 0 then
-    ui.label(0, 160, "BEST " .. save.best .. " ms", {size = 12, color = 0xFFD166, w = ui.W, align = "center"})
+    ui.label(0, 161, "BEST " .. save.best .. " ms", {size = 12, color = 0xFFD166, w = ui.W, align = "center"})
   end
-  V.mode = ui.label(220, 160, "", {size = 12, color = 0xFFD166})
+  V.mode = ui.label(220, 161, "", {size = 12, color = 0xFFD166})
   title_mode_text()
   ui.hint("UP/DOWN choose   SELECT open   CANCEL exit")
   flush_pending()
+  SEC.due()
+end
+
+-- the SECRETS item shows how many are found
+SEC.label = function()
+  if scene == "title" and V.menu then title_draw_menu() end
+end
+
+-- secrets screen: found ones say how, the rest give a hint
+SEC.show = function()
+  scene = "secrets"
+  ui.clear()
+  ui.bg(0x0B1030)
+  ui.label(8, 4, "SECRETS " .. SEC.count() .. "/" .. #SEC.list, {size = 20, color = "text"})
+  for n, it in ipairs(SEC.list) do
+    local y = 30 + (n - 1) * 25
+    local got = SEC.found[it.id]
+    ui.label(8, y, (got and "+ " or "? ") .. it.name, {size = 12, color = got and 0x14F195 or 0xFFD166})
+    ui.label(20, y + 12, got and it.how or it.hint, {size = 12, color = got and "dim" or "text"})
+  end
+  if SEC.all() then
+    ui.label(8, 182, "GOLD TRADER: " .. (settings.gold and "ON" or "OFF") .. "  (SELECT to switch)", {size = 12, color = 0xFFD166})
+  else
+    ui.label(8, 182, "Each: +1 !LAMP once. All 6: GOLD TRADER + 3", {size = 12, color = 0xFF8AD8})
+  end
+  ui.hint(SEC.all() and "SELECT gold on/off   CANCEL back" or "CANCEL back")
 end
 
 local function title_tick(dt)
   V.t = V.t + dt
   V.idle = V.idle + dt
   local t = V.t
-  V.hero:set(IMG["traderRun" .. (floor(t * 8) % 2 + 1)])
+  V.hero:set(IMG[(settings.gold and "gold_" or "") .. "traderRun" .. (floor(t * 8) % 2 + 1)])
   V.shark:set(IMG["shark" .. (floor(t * 5) % 2 + 1)])
   V.shark:pos(4 + floor(math.sin(t * 2) * 6), GY + 12)
   local off = floor(t * 120) % 64
@@ -1347,7 +1483,7 @@ show_help = function()
     {"All 4: DZ TUNNEL, score x3.", 0x14F195},
     {"Coins in a row: combo to x5.", 0xFFD166},
     {"5 worlds = a lap, each faster.", "dim"},
-    {"Secrets hide everywhere.", "dim"},
+    {"Secrets: see SECRETS for hints.", 0xFF8AD8},
   }
   for i, ln in ipairs(lines) do
     ui.label(8, 28 + (i - 1) * 14, ln[1], {size = 12, color = ln[2]})
@@ -1369,10 +1505,14 @@ function on_key(key, rep)
         title_mode_text()
         ui.toast(ibrl and "IBRL MODE: everything faster" or "IBRL MODE off")
         flash(0xFFD166, 0.4)
+        SEC.find("ibrl")
+        SEC.label()
       elseif ends_with(GM) then
         keylog = {}
         V.gm = 2
         ui.toast("gm")
+        SEC.find("gm")
+        SEC.label()
       end
     end
     if key == "up" then
@@ -1388,11 +1528,24 @@ function on_key(key, rep)
       elseif id == "lb" then show_lb()
       elseif id == "stats" then show_stats()
       elseif id == "settings" then set_sel = 1 show_settings()
+      elseif id == "secrets" then SEC.show()
       else show_help() end
     end
     return true
   elseif scene == "help" or scene == "stats" then
     if key == "select" or key == "back" then show_title() end
+    return true
+  elseif scene == "secrets" then
+    if key == "back" then show_title()
+    elseif key == "select" then
+      if SEC.all() then
+        settings.gold = not settings.gold
+        save_settings()
+        SEC.show()
+      else
+        show_title()
+      end
+    end
     return true
   elseif scene == "settings" then
     if key == "back" then show_title()

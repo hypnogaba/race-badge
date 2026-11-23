@@ -1,9 +1,9 @@
 {
   "id": "fiber-run",
   "name": "Fiber Run",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": "@hypnogaba",
-  "summary": "Run the DoubleZero fiber, outrun the shark, grab Solana, Kalshi, Hyperliquid and Phoenix coins to open the DZ tunnel. Global leaderboard, daily !LAMPs, share your run on X.",
+  "summary": "Outrun the shark on the DoubleZero fiber: open the DZ tunnel, find 6 secrets, earn !LAMPs.",
   "icon": "play",
   "accent": "3FF5E0",
   "category": "games",

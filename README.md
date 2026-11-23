@@ -7,6 +7,15 @@ open the DZ tunnel.
 
 Lua for Solana OS 2.x (ESP32-C5, 320 x 218 screen). Files for the store: `app.json`, `main.lua`, `art.lua`.
 
+## 0.3.0 (23 Nov 2026)
+- Fog: 48 px instead of 80, half as dense, drawn under obstacles and the runner, so threats are
+  always visible (Ivan: the fog hid a quarter of the screen).
+- SECRETS on the title: hints for 6 secrets (IBRL MODE, GM, HYPURR, DOUBLEZERO, BROKEN PIXEL,
+  LIGHT SPEED), the how once found. Each pays 1 !LAMP once ever (0.2.0 achievements count); all
+  six pay 3 more and unlock the GOLD TRADER (switch it on the SECRETS screen).
+- Daily awards are marked paid only when the server pays. Secrets live in one table (SEC): the
+  main chunk is at Lua's 200-local limit.
+
 ## How it is built
 - `main.lua`: the game. The run logic is a port of the web game's `sim` package (same numbers,
   60 sim ticks per second, 1 world unit = 2 px), then the screen: a sky rect, the far skyline of each

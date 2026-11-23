@@ -27,6 +27,15 @@ function __stats() show_stats() end
 function __persist() persist() end
 function __start() start_run(false) end
 function __set_last(t) last_run = t end
+function __SEC() return SEC end
+function __V() return V end
+function __is_gold() local i = V.player.img return i == IMG.gold_traderRun1 or i == IMG.gold_traderRun2 or i == IMG.gold_traderJump1 end
+function __IMG() return IMG end
+function __SIZE() return SIZE end
+function __unlock(id) unlock(id, S) end
+function __fog_drawn_under()   -- the fog image is created (drawn) before the obstacles and the player
+  return V.fog.obj._id < V.obs[1].obj._id and V.fog.obj._id < V.player.obj._id
+end
 """
 
 fails = 0
@@ -76,7 +85,7 @@ check("title shows the menu", all(has_text(r, s) for s in ("RUN", "LEADERBOARD",
 check("sys.tick asked for 60 Hz (17 ms)", getattr(r.m, "tick_ms", None) == 17)
 
 for n, (scene, name) in enumerate((("lb", "leaderboard"), ("stats", "stats"), ("help", "help"),
-                                   ("settings", "settings")), start=1):
+                                   ("secrets", "secrets"), ("settings", "settings")), start=1):
     for _ in range(n):
         r.key("down")
     r.key("select")
@@ -274,7 +283,7 @@ g(r, "__stats")
 check("stats list achievements", has_text(r, "ACHIEVEMENTS 2/11") and has_text(r, "[x] FIRST DZ TUNNEL"))
 shot(r, "10_stats")
 r.key("back")
-for _ in range(4):
+for _ in range(5):
     r.key("down")
 r.key("select")
 check("settings open", g(r, "__scene") == "settings")
@@ -318,6 +327,75 @@ r.cb("on_exit")
 check("exit while dying counts the run", g(r, "__save")["runs"] == 1)
 check("exit while dying keeps the run to send later", isinstance(r.m.storage.get("lb_pending"), object)
       and r.m.storage.get("lb_pending") is not None)
+
+# ---------------------------------------------------------------- secrets: hints, finds, !LAMPs, gold
+r = Runner(21, expose=EXPOSE)
+SEC = g(r, "__SEC")
+menu_ids = [it.id for it in g(r, "__V").menu.values()]
+check("SECRETS in the title menu", "secrets" in menu_ids)
+check("menu label shows 0/6", has_text(r, "SECRETS 0/6"))
+for k in ("up", "up", "down", "down", "left", "right", "left", "right"):
+    r.key(k)
+check("IBRL code counts as a secret", SEC.found["ibrl"] is True and (1, "secret: IBRL MODE") in r.m.awards)
+check("menu label shows 1/6", has_text(r, "SECRETS 1/6"))
+for k in ("up", "up", "down", "down", "left", "right", "left", "right"):
+    r.key(k)
+check("IBRL again: no second award", r.m.awards.count((1, "secret: IBRL MODE")) == 1)
+g(r, "__V").sel = menu_ids.index("secrets") + 1
+r.key("select")
+check("secrets screen opens", g(r, "__scene") == "secrets")
+check("found secret shows how", has_text(r, "UP UP DOWN DOWN LEFT RIGHT LEFT RIGHT"))
+check("unfound secret shows a hint", has_text(r, "Last a minute, then jump high for gold."))
+shot(r, "20_secrets")
+r.key("back")
+check("back to the title", g(r, "__scene") == "title")
+for k in ("left", "right", "left", "right", "up", "up"):
+    r.key(k)
+r.key("select")   # whatever is selected: start a run to collect the in-run secrets
+g(r, "__start")
+for k in ("hypurr", "zero", "pixel"):
+    r.lua.globals().__unlock(k)
+check("5 of 6 so far, no gold yet", SEC.count() == 5 and not g(r, "__settings")["gold"])
+r.lua.globals().__unlock("k10")
+check("all six: 3 more !LAMPs", (3, "all secrets found") in r.m.awards)
+check("all six: GOLD TRADER worn", g(r, "__settings")["gold"] is True)
+for _ in range(30):
+    r.tick(17)
+check("the runner is drawn in gold", g(r, "__is_gold") is True)
+shot(r, "21_gold_run")
+
+# a 0.2.0 player with achievements: those secrets are already found and paid on the title
+r = Runner(22, expose=EXPOSE)
+r.lua.execute("")
+import sim
+orig = sim.Mock.__init__
+
+
+def mi(self, lua, rng):
+    orig(self, lua, rng)
+    self.storage["save"] = lua.table_from({"best": 5000, "runs": 3, "ach": lua.table_from({"hypurr": True, "zero": True})})
+
+
+sim.Mock.__init__ = mi
+r = Runner(23, expose=EXPOSE)
+sim.Mock.__init__ = orig
+check("old achievements count as found secrets", g(r, "__SEC").count() == 2)
+check("old finds are paid on the title", (1, "secret: HYPURR") in r.m.awards and (1, "secret: DOUBLEZERO") in r.m.awards)
+
+# capped day: no payment stored, asked again on the next launch only
+capped = Runner(24, award=lambda n, why: (True, {"awarded": 0, "balance": 1}), expose=EXPOSE)
+for k in ("left", "right", "left", "right", "up", "up"):
+    capped.key(k)
+check("capped: not stored as paid", capped.m.storage.get("spaid") is None)
+
+# the fog sits under the obstacles and is a narrow haze
+r = Runner(25, expose=EXPOSE)
+g(r, "__start")
+fog_w = g(r, "__SIZE").fog[1] * 2
+check("fog is at most 48 px wide (was 80)", fog_w <= 48)
+order = list(r.m.order) if hasattr(r.m, "order") else []
+fog_id = g(r, "__V").fog.obj
+check("fog is drawn under the obstacles", g(r, "__fog_drawn_under") is True)
 
 print("max instructions per callback:", r.maxi)
 print(f"FAILED {fails}" if fails else "all passed")
