@@ -1300,6 +1300,7 @@ local function settings_draw()
     "LEDS: " .. (settings.leds and "ON" or "OFF"),
     "NAME ON BOARD: " .. (settings.name and lb_name() or "ANON"),
     "RESET STATS",
+    "MADE BY @HYPNOGABA (X)",
   }
   for n, l in ipairs(set_rows) do
     local on = n == set_sel
@@ -1314,7 +1315,7 @@ show_settings = function()
   ui.bg(0x0B1030)
   ui.label(8, 4, "SETTINGS", {size = 20, color = "text"})
   set_rows = {}
-  for n = 1, 3 do set_rows[n] = ui.label(16, 44 + (n - 1) * 24, "", {size = 14}) end
+  for n = 1, 4 do set_rows[n] = ui.label(16, 40 + (n - 1) * 22, "", {size = 14}) end
   ui.label(16, 130, "The board shows your X handle from My Badge,", {size = 12, color = "dim"})
   ui.label(16, 144, "or ANON if you turn it off.", {size = 12, color = "dim"})
   settings_draw()
@@ -1327,6 +1328,20 @@ local function settings_select()
     if not settings.leds then for n = 1, 8 do if has_led then led.hex(n, 0) end end led_now = {} end
   elseif set_sel == 2 then
     settings.name = not settings.name
+  elseif set_sel == 4 then
+    -- the maker on X: a QR the phone scans
+    scene = "author"
+    ui.clear()
+    ui.bg(0x0B1030)
+    ui.label(8, 10, "MADE BY", {size = 12, color = "dim"})
+    ui.label(8, 26, "@hypnogaba", {size = 20, color = "text"})
+    ui.label(8, 60, "Scan for X:", {size = 12, color = "dim"})
+    ui.label(8, 74, "x.com/hypnogaba", {size = 12, color = 0x14F195})
+    if not (ui.qr and pcall(ui.qr, 130, 8, 180, "https://x.com/hypnogaba")) then
+      ui.label(130, 90, "Update Solana OS", {size = 14, color = "pink"})
+    end
+    ui.hint("CANCEL back")
+    return
   else
     ui.confirm("Reset your stats, best and achievements?", function(yes)
       if yes then
@@ -1538,6 +1553,9 @@ function on_key(key, rep)
         show_title()
       end
     end
+    return true
+  elseif scene == "author" then
+    if key == "back" or key == "select" then show_settings() end
     return true
   elseif scene == "settings" then
     if key == "back" then show_title()

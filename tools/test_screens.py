@@ -285,6 +285,23 @@ for _ in range(5):
     r.key("down")
 r.key("select")
 check("settings open", g(r, "__scene") == "settings")
+for _ in range(3):
+    r.key("up")                       # up from row 1 wraps to row 4: MADE BY @HYPNOGABA
+r.key("up")
+r.key("down")
+r.key("down")
+r.key("down")
+_qr = {}
+_old_qr = r.lua.globals()["ui"]["qr"]
+r.lua.globals()["ui"]["qr"] = lambda x, y, size, text: _qr.setdefault("t", text) and None
+r.key("select")
+check("settings: MADE BY @HYPNOGABA shows a QR to x.com/hypnogaba", g(r, "__scene") == "author" and _qr.get("t") == "https://x.com/hypnogaba")
+shot(r, "12_author")
+r.key("back")
+check("CANCEL from the maker page: settings", g(r, "__scene") == "settings")
+r.lua.globals()["ui"]["qr"] = _old_qr
+for _ in range(3):
+    r.key("up")                       # back to row 1
 r.key("select")
 check("LEDs can be turned off", g(r, "__settings")["leds"] is False and r.m.storage["settings"]["leds"] is False)
 r.tick(30)
