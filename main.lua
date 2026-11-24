@@ -1064,7 +1064,7 @@ local function draw(s, dt)
 end
 
 -- ================================================================== scenes
-local show_title, show_help, show_over, show_lb, show_stats, show_settings, show_share
+local show_title, show_help, show_over, show_lb, show_stats, show_settings, show_share, show_author
 local last_run = nil   -- {score, lap, tunnels, secs, new_best} of the last finished run
 
 local function held()
@@ -1292,6 +1292,24 @@ show_stats = function()
   ui.hint("SELECT or CANCEL back")
 end
 
+-- ------------------------------------------------------------------ the maker on X
+-- A QR the phone scans, from the title menu and from SETTINGS (back goes where it came from).
+local author_back = "title"
+show_author = function(back)
+  author_back = back or "title"
+  scene = "author"
+  ui.clear()
+  ui.bg(0x0B1030)
+  ui.label(8, 10, "MADE BY", {size = 12, color = "dim"})
+  ui.label(8, 26, "@hypnogaba", {size = 20, color = "text"})
+  ui.label(8, 60, "Scan for X:", {size = 12, color = "dim"})
+  ui.label(8, 74, "x.com/hypnogaba", {size = 12, color = 0x14F195})
+  if not (ui.qr and pcall(ui.qr, 130, 8, 180, "https://x.com/hypnogaba")) then
+    ui.label(130, 90, "Update Solana OS", {size = 14, color = "pink"})
+  end
+  ui.hint("CANCEL back")
+end
+
 -- ------------------------------------------------------------------ settings
 local set_sel = 1
 local set_rows = {}
@@ -1329,18 +1347,7 @@ local function settings_select()
   elseif set_sel == 2 then
     settings.name = not settings.name
   elseif set_sel == 4 then
-    -- the maker on X: a QR the phone scans
-    scene = "author"
-    ui.clear()
-    ui.bg(0x0B1030)
-    ui.label(8, 10, "MADE BY", {size = 12, color = "dim"})
-    ui.label(8, 26, "@hypnogaba", {size = 20, color = "text"})
-    ui.label(8, 60, "Scan for X:", {size = 12, color = "dim"})
-    ui.label(8, 74, "x.com/hypnogaba", {size = 12, color = 0x14F195})
-    if not (ui.qr and pcall(ui.qr, 130, 8, 180, "https://x.com/hypnogaba")) then
-      ui.label(130, 90, "Update Solana OS", {size = 14, color = "pink"})
-    end
-    ui.hint("CANCEL back")
+    show_author("settings")
     return
   else
     ui.confirm("Reset your stats, best and achievements?", function(yes)
@@ -1360,7 +1367,7 @@ end
 local MENU = {
   {id = "play", text = "RUN"}, {id = "lb", text = "LEADERBOARD"}, {id = "stats", text = "STATS"},
   {id = "help", text = "HOW TO PLAY"}, {id = "secrets", text = "SECRETS"},
-  {id = "settings", text = "SETTINGS"},
+  {id = "settings", text = "SETTINGS"}, {id = "author", text = "MADE BY @HYPNOGABA"},
 }
 local KONAMI = {"up", "up", "down", "down", "left", "right", "left", "right"}
 local GM = {"left", "right", "left", "right", "up", "up"}
@@ -1405,14 +1412,14 @@ show_title = function()
   V.hero = ui.image(36, GY - 28, IMG.traderRun1, {scale = U})
   V.shark = ui.image(4, GY + 12, IMG.shark1, {scale = U})
   -- a dark plate behind the menu so it reads over the city
-  ui.rect(84, 60, 152, 98, {color = 0x0B1030})
-  ui.gradient(84, 60, 152, 2)
-  ui.gradient(84, 157, 152, 2)
+  ui.rect(60, 60, 200, 101, {color = 0x0B1030})
+  ui.gradient(60, 60, 200, 2)
+  ui.gradient(60, 159, 200, 2)
   ui.label(0, 10, "FIBER RUN", {size = 32, color = "text", w = ui.W, align = "center"})
-  ui.label(0, 46, "a DoubleZero game", {size = 12, color = 0x3FF5E0, w = ui.W, align = "center"})
+  ui.label(0, 46, "a DoubleZero game by @hypnogaba", {size = 12, color = 0x3FF5E0, w = ui.W, align = "center"})
   V.menu = {}
   for n, it in ipairs(MENU) do
-    V.menu[n] = {id = it.id, text = it.text, l = ui.label(0, 64 + (n - 1) * 15, "", {size = 14, w = ui.W, align = "center"})}
+    V.menu[n] = {id = it.id, text = it.text, l = ui.label(0, 61 + (n - 1) * 14, "", {size = 14, w = ui.W, align = "center"})}
   end
   V.sel = V.sel or 1
   title_draw_menu()
@@ -1536,6 +1543,7 @@ function on_key(key, rep)
       elseif id == "stats" then show_stats()
       elseif id == "settings" then set_sel = 1 show_settings()
       elseif id == "secrets" then SEC.show()
+      elseif id == "author" then show_author("title")
       else show_help() end
     end
     return true
@@ -1555,7 +1563,9 @@ function on_key(key, rep)
     end
     return true
   elseif scene == "author" then
-    if key == "back" or key == "select" then show_settings() end
+    if (key == "back" or key == "select") and not rep then   -- a held SELECT doesn't bounce back
+      if author_back == "settings" then show_settings() else show_title() end
+    end
     return true
   elseif scene == "settings" then
     if key == "back" then show_title()

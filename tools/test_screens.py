@@ -299,6 +299,22 @@ check("settings: MADE BY @HYPNOGABA shows a QR to x.com/hypnogaba", g(r, "__scen
 shot(r, "12_author")
 r.key("back")
 check("CANCEL from the maker page: settings", g(r, "__scene") == "settings")
+r.key("back")
+check("CANCEL from settings: title", g(r, "__scene") == "title")
+r.key("up")                           # the title starts on RUN: up wraps to MADE BY @HYPNOGABA, last
+_qr.clear()
+r.key("select")
+check("title menu: MADE BY @HYPNOGABA opens the QR to x.com/hypnogaba", g(r, "__scene") == "author" and _qr.get("t") == "https://x.com/hypnogaba")
+r.key("back")
+check("CANCEL from the maker page opened on the title: title", g(r, "__scene") == "title")
+check("the title says who made it", has_text(r, "by @hypnogaba") and has_text(r, "MADE BY @HYPNOGABA"))
+shot(r, "01b_title_author")
+r.key("up")
+r.key("up")
+r.key("select")
+check("settings again", g(r, "__scene") == "settings")
+for _ in range(3):
+    r.key("down")                     # row 4, where the steps below expect it
 r.lua.globals()["ui"]["qr"] = _old_qr
 for _ in range(3):
     r.key("up")                       # back to row 1
